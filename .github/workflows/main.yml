@@ -19,6 +19,7 @@ from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
 
+# ===== إعدادات التحكم =====
 OWNER_ID = 6762940512
 bot_token = "8520006260:AAGWatChzdHGXhZILav0gqX3Jn91NDzj1fg"
 
@@ -29,15 +30,30 @@ replied_users = {}
 reply_queue = asyncio.Queue()
 
 def init_log(name):
-    account_logs[name] = {'unique_ids': set(), 'total_count': 0, 'failed_count': 0, 'last_fail_reason': 'لا يوجد', 'status': 'نشط ✅', 'pause_until': 0}
+    account_logs[name] = {
+        'unique_ids': set(), 'total_count': 0, 'failed_count': 0,
+        'last_fail_reason': 'لا يوجد', 'status': 'نشط ✅', 'pause_until': 0
+    }
 
+# --- إعدادات الحسابات المحدثة (الجلسات الجديدة) ---
 sessions_config = [
-    {'name': 'الجلسة الجديدة 1', 'id': 35234215, 'hash': '2f560ad5ac9a1c11b8582e42471c403c', 'str': '1BJWap1sBu5QxQPXDKdwMTJiQfyh9KD8cRE4pUghL9slakYFyvUUFTRcnN4xvUPEd6F-y01Mv2EkwTonZJpWO7Dsm3eMYhx11hntNpTwAPMz--Jv2_nZLQMzWl62Ssdi7c2FlhtMvr5f3wyE5IW2ocnAtvfVzUTs59hTh9cXwlMuoHzyYCYYibA2AadPuLjIOflMfmHa-JrMdAvCwSUe0_T6TtA5D8USSW_4ps7Y_B7rjDLbHvsVxZtzcBjGzJmGytxV0kyzsE_8luEJvxdUganOtyeBMKboIIByfou_uLWuF7QyYaCKspW422iHlmIHByJ_GZeI_Rrsy6c2w5Atr4BgIwHQlQ6M='},
-    {'name': 'الجلسة الجديدة 2', 'id': 39838472, 'hash': '39e0757f5b96e8a84c7797c17d28c29a', 'str': '1BJWap1sBu6F1feEVYtqx1o_ImLPmDXsjDKfL2q4nhfLm1BRYg_RpFRz-KHG9XV67qeBMmBuwusFA1YXF62GHSYDQtgx1fdy0eNy-_nQinIQHvnsMHEKdEpurPDuw9d_FmUTp2QrXj10qgWAs0XG6jRGAbqnzFNHJXnFHNgvm-tiIicwYflF_AeGiEZNc1mYZ832sQrReBdJ-g7eLYbpqSC7j3XLuylrZdxdc7eTJLURe78mHN1-y_4tPquvAULVtfl6REAaVR1zzYOfHiWojZzRPSGqAxj6dRZKGeM2lIpUL_1O6rAUUc49KJJlNgTBG5HF_xOx9qSa3DEQIhQlUiJpohQZBGuA='}
+    {
+        'name': 'الجلسة الجديدة 1',
+        'id': 35234215,
+        'hash': '2f560ad5ac9a1c11b8582e42471c403c',
+        'str': '1BJWap1sBu5QxQPXDKdwMTJiQfyh9KD8cRE4pUghL9slakYFyvUUFTRcnN4xvUPEd6F-y01Mv2EkwTonZJpWO7Dsm3eMYhx11hntNpTwAPMz--Jv2_nZLQMzWl62Ssdi7c2FlhtMvr5f3wyE5IW2ocnAtvfVzUTs59hTh9cXwlMuoHzyYCYYibA2AadPuLjIOflMfmHa-JrMdAvCwSUe0_T6TtA5D8USSW_4ps7Y_B7rjDLbHvsVxZtzcBjGzJmGytxV0kyzsE_8luEJvxdUganOtyeBMKboIIByfou_uLWuF7QyYaCKspW422iHlmIHByJ_GZeI_Rrsy6c2w5Atr4BgIwHQlQ6M='
+    },
+    {
+        'name': 'الجلسة الجديدة 2',
+        'id': 39838472,
+        'hash': '39e0757f5b96e8a84c7797c17d28c29a',
+        'str': '1BJWap1sBu6F1feEVYtqx1o_ImLPmDXsjDKfL2q4nhfLm1BRYg_RpFRz-KHG9XV67qeBMmBuwusFA1YXF62GHSYDQtgx1fdy0eNy-_nQinIQHvnsMHEKdEpurPDuw9d_FmUTp2QrXj10qgWAs0XG6jRGAbqnzFNHJXnFHNgvm-tiIicwYflF_AeGiEZNc1mYZ832sQrReBdJ-g7eLYbpqSC7j3XLuylrZdxdc7eTJLURe78mHN1-y_4tPquvAULVtfl6REAaVR1zzYOfHiWojZzRPSGqAxj6dRZKGeM2lIpUL_1O6rAUUc49KJJlNgTBG5HF_xOx9qSa3DEQIhQlUiJpohQZBGuA='
+    }
 ]
 
 MY_IDS = [s['id'] for s in sessions_config]
 target_links = ['https://t.me/+z7K5sSzvWQU3NTAy', 'https://t.me/pewndgrop', 'https://t.me/M_R515', 'https://t.me/+wtGW0icU0pY2YWY0', 'https://t.me/krkokgrop']
+
 replies_khas = ["وين رايحين، التبادلات مضيعة للوقت يخوي، عندي لك رابط بوت كله مقاطع نار نار، رابطو بوصف حسابي نار.", "ليش الخاص يحلوين، روحو البوت رابطوو بوصف حسابي", "ليش تتعب حالك بالخاص وهيك، روح البوت رابطو بوصف حسابي لاتفوت الفرصه شوي واحذفه"]
 replies_tabadel = ["تبغا مقاطع ورعان ياصاحبي، معي بوت بوصف حسابي فيه 30 الف مقطع", "التبادلات تعب، عندي لك بوت بوصف حسابي ببلاش ورعان من كل الجنسيات", "مقاطع ورعان اخر موديل، البوت بوصف حسابي وقول للتبادلات باي باي", "خش البوت حقي من وصف حسابي وعيش الجو مع الورعان اخر دقه", "ضفت اكثر من 31 الف مقطع ورع عندي بالبوت بوصف حسابي لو تريد"]
 
@@ -97,6 +113,7 @@ async def main():
             clients.append(client)
             asyncio.create_task(worker(client, real_name))
             print(f"🚀 متصل الآن: [{real_name}]")
+        except UserDeactivatedError: print(f"❌ الجلسة {s_info['name']} معطلة.")
         except Exception as e: print(f"❌ خطأ في {s_info['name']}: {e}")
 
     @control_bot.on(events.CallbackQuery())
@@ -121,9 +138,10 @@ async def main():
                 global is_paused
                 is_paused = not is_paused
                 await event.answer(f"تم {'الإيقاف' if is_paused else 'الاستئناف'}")
-                await event.edit("🕹️ **لوحة التحكم:**", buttons=[[Button.inline("📊 تقرير عن الحسابات", b"report")],[Button.inline("🕒 آخر الردود بأي قروب", b"last_replies")],[Button.inline("⏸️ توقف مؤقت" if not is_paused else "▶️ استئناف العمل", b"toggle")]])
+                await cmd_control(event)
             elif data == b"back":
                 await event.edit("🕹️ **لوحة التحكم:**", buttons=[[Button.inline("📊 تقرير عن الحسابات", b"report")],[Button.inline("🕒 آخر الردود بأي قروب", b"last_replies")],[Button.inline("⏸️ توقف مؤقت" if not is_paused else "▶️ استئناف العمل", b"toggle")]])
+        except MessageNotModifiedError: await event.answer("لا يوجد تحديث")
         except Exception: pass
 
     @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
@@ -131,11 +149,13 @@ async def main():
         await event.reply("🕹️ **لوحة التحكم المتقدمة:**", buttons=[[Button.inline("📊 تقرير عن الحسابات", b"report")],[Button.inline("🕒 آخر الردود بأي قروب", b"last_replies")],[Button.inline("⏸️ توقف مؤقت" if not is_paused else "▶️ استئناف العمل", b"toggle")]])
 
     resolved_ids = []
+    print("📡 جاري ربط المجموعات الجديدة...")
     for link in target_links:
         for client in clients:
             try:
                 entity = await client.get_entity(link)
                 resolved_ids.append(entity.id)
+                print(f"✅ تم ربط: {link}")
                 break
             except: continue
 
@@ -144,8 +164,7 @@ async def main():
         global idx_khas, idx_tabadel, is_paused
         if is_paused or event.sender_id in MY_IDS: return
         if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 7200): return
-        text = (event.text or "").strip()
-        reply_msg = None
+        text = (event.text or "").strip(); reply_msg = None
         if "خاص" in text:
             reply_msg = replies_khas[idx_khas]; idx_khas = (idx_khas + 1) % len(replies_khas)
         elif any(w in text for w in ["تبادل", "ورعان", "ورع", "صغار"]):
