@@ -1,0 +1,19 @@
+name: Terminal_Direct
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-direct:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open_Terminal_And_Run
+        run: |
+          # إضافة -y لضمان عدم توقف البناء طلباً للموافقة
+          sudo apt-get update -y
+          pip install --upgrade pip
+          pip install telethon 
+          
+          # تشغيل الكود مباشرة
+          echo "from telethon import TelegramClient; print('✅ المكتبة جاهزة والترمنال يعمل!')" > myscript.py
+          python3 myscript.py
