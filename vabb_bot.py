@@ -18,26 +18,29 @@ ADMIN_USERNAME = "@i_z_000"
 CORRECT_CODE = "55012"
 DATA_FILE = "data.json"
 admin_chat_id = None
+bot_config = {"photo1": None, "caption1": None, "photo2": None, "caption2": None}
 
 # --- إدارة البيانات ---
 def save_data():
-    with open(DATA_FILE, 'w') as f:
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump({
             'user_data': user_data,
             'link_clicks': link_clicks,
-            'admin_chat_id': admin_chat_id
-        }, f)
+            'admin_chat_id': admin_chat_id,
+            'bot_config': bot_config
+        }, f, ensure_ascii=False, indent=4)
 
 def load_data():
-    global admin_chat_id
+    global admin_chat_id, bot_config
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, 'r') as f:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            u_data = {int(k): v for k, v in data['user_data'].items()}
+            u_data = {int(k): v for k, v in data.get('user_data', {}).items()}
             admin_chat_id = data.get('admin_chat_id')
+            bot_config = data.get('bot_config', {"photo1": None, "caption1": None, "photo2": None, "caption2": None})
             return u_data, data.get('link_clicks', 0)
-        except: return {}, 0
+        except: pass
     return {}, 0
 
 user_data, link_clicks = load_data()
@@ -48,6 +51,11 @@ async def monitor_inactivity(app):
             now = datetime.now()
             for user_id, data in list(user_data.items()):
                 if not data.get('activated') and not data.get('received_inactivity_msg'):
+                    # إصلاح الخطأ لليوزرات القديمة التي لا تملك join_time
+                    if 'join_time' not in data:
+                        data['join_time'] = datetime.now().isoformat()
+                        save_data()
+
                     join_time = datetime.fromisoformat(data['join_time'])
                     if (now - join_time).total_seconds() > 600: # 10 دقائق
                         if bot_config["photo2"]:
@@ -70,21 +78,6 @@ async def monitor_inactivity(app):
 CODE_LINK = "https://t.me/example"
 SUB_CHANNEL_LINK = "https://t.me/example"
 ENABLE_SUB_CHECK = "no"
-
-CONFIG_FILE = "config.json"
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except: pass
-    return {"photo1": None, "caption1": None, "photo2": None, "caption2": None}
-
-def save_config(cfg):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(cfg, f)
-
-bot_config = load_config()
 
 # --- لوحة المفاتيح الرئيسية ---
 def get_main_keyboard(is_admin=False):
@@ -135,6 +128,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # التقاط ID المسؤول
     if username == ADMIN_USERNAME:
         admin_chat_id = user_id
+        save_data()
 
     save_data()
 
@@ -151,11 +145,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_admin = (username == ADMIN_USERNAME)
     if is_admin:
+        # التأكد من تحميل البيانات في كل مرة يبدأ فيها المدير
+        load_data()
         if not bot_config["photo1"]:
             context.user_data['setup_step'] = 'waiting_photo1'
             await update.message.reply_text("مرحباً أيها المدير. يرجى إرسال الصورة الأولى (التي ستظهر بعد إرسال الروابط) ⭐")
             return
-        elif not bot_config["photo2"]:
+        elif not bot_config.get("photo2"):
             context.user_data['setup_step'] = 'waiting_photo2'
             await update.message.reply_text("يرجى إرسال الصورة الثانية (التي ستظهر بعد 10 دقائق من عدم التفاعل) 🕒")
             return
@@ -318,7 +314,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if message.photo:
                 bot_config["photo1"] = message.photo[-1].file_id
                 bot_config["caption1"] = message.caption or "تم استلام الروابط بنجاح"
-                save_config(bot_config)
+                save_data()
                 context.user_data['setup_step'] = 'waiting_photo2'
                 await message.reply_text("تم حفظ الصورة الأولى والوصف. الآن أرسل الصورة الثانية والوصف (لحالة عدم التفاعل) ⭐")
             else:
@@ -328,7 +324,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if message.photo:
                 bot_config["photo2"] = message.photo[-1].file_id
                 bot_config["caption2"] = message.caption or "نحن بانتظارك لتفعيل البوت"
-                save_config(bot_config)
+                save_data()
                 context.user_data['setup_step'] = None
                 await message.reply_text("تم اكتمال الإعداد بنجاح! 🔥")
                 await message.reply_text("🔥 مرحباً بك في أضخم بوت عربي 2026 🔥", reply_markup=get_main_keyboard(True))
