@@ -5,28 +5,75 @@ from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
-import config
 
-# --- التخزين الدائم ---
+# =======================================================
+# ⚙️ إعدادات التحكم (تعديل هنا فقط)
+# =======================================================
+OWNER_ID = 6762940512
+BOT_TOKEN = "8520006260:AAGWatChzdHGXhZILav0gqX3Jn91NDzj1fg"
+
+# إعدادات الحسابات
+SESSIONS_CONFIG = [
+    {
+        'name': 'الجلسة 1',
+        'id': 35234215,
+        'hash': '2f560ad5ac9a1c11b8582e42471c403c',
+        'str': "1BJWap1sBu5QxQPXDKdwMTJiQfyh9KD8cRE4pUghL9slakYFyvUUFTRcnN4xvUPEd6F-y01Mv2EkwTonZJpWO7Dsm3eMYhx11hntNpTwAPMz--Jv2_nZLQMzWl62Ssdi7c2FlhtMvr5f3wyE5IW2ocnAtvfVzUTs59hTh9cXwlMuoHzyYCYYibA2AadPuLjIOflMfmHa-JrMdAvCwSUe0_T6TtA5D8USSW_4ps7Y_B7rjDLbHvsVxZtzcBjGzJmGytxV0kyzsE_8luEJvxdUganOtyeBMKboIIByfou_uLWuF7QyYaCKspW422iHlmIHByJ_GZeI_Rrsy6c2w5Atr4BgIwHQlQ6M="
+    },
+    {
+        'name': 'الجلسة 2',
+        'id': 39838472,
+        'hash': '39e0757f5b96e8a84c7797c17d28c29a',
+        'str': "1BJWap1sBu6F1feEVYtqx1o_ImLPmDXsjDKfL2q4nhfLm1BRYg_RpFRz-KHG9XV67qeBMmBuwusFA1YXF62GHSYDQtgx1fdy0eNy-_nQinIQHvnsMHEKdEpurPDuw9d_FmUTp2QrXj10qgWAs0XG6jRGAbqnzFNHJXnFHNgvm-tiIicwYflF_AeGiEZNc1mYZ832sQrReBdJ-g7eLYbpqSC7j3XLuylrZdxdc7eTJLURe78mHN1-y_4tPquvAULVtfl6REAaVR1zzYOfHiWojZzRPSGqAxj6dRZKGeM2lIpUL_1O6rAUUc49KJJlNgTBG5HF_xOx9qSa3DEQIhQlUiJpohQZBGuA="
+    }
+]
+
+# النوع الأول: كلمات مفتاحية للخاص
+KEYWORDS_KHAS = ["خاص"]
+REPLIES_KHAS = [
+    "وين رايحين، التبادلات مضيعة للوقت يخوي، عندي لك رابط بوت كله مقاطع نار نار، رابطو بوصف حسابي نار.",
+    "ليش الخاص يحلوين، روحو البوت رابطوو بوصف حسابي",
+    "ليش تتعب حالك بالخاص وهيك، روح البوت رابطو بوصف حسابي لاتفوت الفرصه شوي واحذفه"
+]
+
+# النوع الثاني: كلمات مفتاحية للتبادل
+KEYWORDS_TABADEL = ["تبادل", "مساعدة"]
+REPLIES_TABADEL = [
+    "تبغا مقاطع ياصاحبي، معي بوت بوصف حسابي فيه 30 الف مقطع",
+    "التبادلات تعب، عندي لك بوت بوصف حسابي ببلاش مقاطع من كل الجنسيات",
+    "مقاطع اخر موديل، البوت بوصف حسابي وقول للتبادلات باي باي",
+    "خش البوت حقي من وصف حسابي وعيش الجو مع المقاطع اخر دقه",
+    "ضفت اكثر من 31 الف مقطع عندي بالبوت بوصف حسابي لو تريد"
+]
+
+# إعدادات النظام
+GROUPS_FILE = "groups.json"
+MAX_PROCESSED_MESSAGES = 1000
+REPLY_COOLDOWN = 7200 # ثانية (ساعتين)
+
+# =======================================================
+# 🛠️ الكود الأساسي (لا تقم بتعديل أي شيء بالأسفل)
+# =======================================================
+
 def load_groups():
-    if os.path.exists(config.GROUPS_FILE):
+    if os.path.exists(GROUPS_FILE):
         try:
-            with open(config.GROUPS_FILE, "r") as f:
+            with open(GROUPS_FILE, "r") as f:
                 data = json.load(f)
                 return data.get("links", []), data.get("ids", [])
         except: pass
     return [], []
 
 def save_groups(links, ids):
-    with open(config.GROUPS_FILE, "w") as f:
+    with open(GROUPS_FILE, "w") as f:
         json.dump({"links": links, "ids": ids}, f)
 
-# تنظيف الجلسات
+# تنظيف الجلسات السابقة
 for f in glob.glob("bot_control_panel.session*"):
     try: os.remove(f)
     except: pass
 
-# --- الحالة ---
+# متغيرات الحالة
 is_paused = False
 waiting_for_group = False
 account_logs = {}
@@ -34,7 +81,7 @@ group_stats = {}
 last_success_list = []
 replied_users = {}
 reply_queue = asyncio.Queue()
-processed_messages = [] # سنستخدم قائمة كـ buffer دائري
+processed_messages = []
 
 def init_log(name):
     account_logs[name] = {
@@ -42,7 +89,7 @@ def init_log(name):
         'status': 'نشط ✅', 'pause_until': 0
     }
 
-# تحميل البيانات
+# تحميل المجموعات
 saved_links, saved_ids = load_groups()
 target_links = list(set(['https://t.me/+z7K5sSzvWQU3NTAy', 'https://t.me/pewndgrop', 'https://t.me/M_R515', 'https://t.me/+wtGW0icU0pY2YWY0', 'https://t.me/krkokgrop'] + saved_links))
 resolved_ids = list(set(saved_ids))
@@ -104,12 +151,17 @@ async def main():
     global is_paused, waiting_for_group, resolved_ids, idx_khas, idx_tabadel
     clients = []
 
+    # التحقق من الإعدادات
+    if not SESSIONS_CONFIG or not SESSIONS_CONFIG[0].get('id') or not SESSIONS_CONFIG[0].get('hash'):
+        print("❌ خطأ: لم يتم ضبط بيانات الجلسات بشكل صحيح.")
+        return
+
     print("🤖 جاري تشغيل بوت التحكم...")
-    control_bot = TelegramClient(StringSession(), config.SESSIONS_CONFIG[0]['id'], config.SESSIONS_CONFIG[0]['hash'])
-    await control_bot.start(bot_token=config.BOT_TOKEN)
+    control_bot = TelegramClient(StringSession(), SESSIONS_CONFIG[0]['id'], SESSIONS_CONFIG[0]['hash'])
+    await control_bot.start(bot_token=BOT_TOKEN)
 
     print("🔑 جاري تشغيل الحسابات...")
-    for s_info in config.SESSIONS_CONFIG:
+    for s_info in SESSIONS_CONFIG:
         client = TelegramClient(StringSession(s_info['str']), s_info['id'], s_info['hash'])
         try:
             await client.start()
@@ -149,7 +201,7 @@ async def main():
                 waiting_for_group = False; await cmd_control(event)
         except Exception: pass
 
-    @control_bot.on(events.NewMessage(from_users=config.OWNER_ID))
+    @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def owner_handler(event):
         global waiting_for_group, target_links, resolved_ids
         if waiting_for_group:
@@ -165,7 +217,7 @@ async def main():
                 else: await event.reply("❌ تنسيق خاطئ: `الرابط | الايدي`")
             except Exception as e: await event.reply(f"❌ خطأ: {e}")
 
-    @control_bot.on(events.NewMessage(pattern='تحكم', from_users=config.OWNER_ID))
+    @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
     async def cmd_control(event):
         buttons = [
             [Button.inline("📊 التقرير", b"report"), Button.inline("💎 إحصائيات", b"group_info")],
@@ -191,30 +243,31 @@ async def main():
         msg_uid = f"{event.chat_id}_{event.id}"
         if msg_uid in processed_messages: return
         processed_messages.append(msg_uid)
-        if len(processed_messages) > config.MAX_PROCESSED_MESSAGES: processed_messages.pop(0)
+        if len(processed_messages) > MAX_PROCESSED_MESSAGES: processed_messages.pop(0)
 
         if is_paused or event.out: return
 
-        my_account_ids = [int(s['id']) for s in config.SESSIONS_CONFIG]
+        my_account_ids = [int(s['id']) for s in SESSIONS_CONFIG]
         if event.sender_id in my_account_ids: return
 
         if event.chat_id not in resolved_ids:
             if event.chat_id not in [int("-100" + str(abs(rid))) for rid in resolved_ids]: return
 
-        if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < config.REPLY_COOLDOWN): return
+        if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < REPLY_COOLDOWN): return
 
         text = (event.text or "").strip(); reply_msg = None
-        if any(k in text for k in config.KEYWORDS_KHAS):
-            reply_msg = config.REPLIES_KHAS[idx_khas]; idx_khas = (idx_khas + 1) % len(config.REPLIES_KHAS)
-        elif any(k in text for k in config.KEYWORDS_TABADEL):
-            reply_msg = config.REPLIES_TABADEL[idx_tabadel]; idx_tabadel = (idx_tabadel + 1) % len(config.REPLIES_TABADEL)
+        if any(k in text for k in KEYWORDS_KHAS):
+            reply_msg = REPLIES_KHAS[idx_khas]; idx_khas = (idx_khas + 1) % len(REPLIES_KHAS)
+        elif any(k in text for k in KEYWORDS_TABADEL):
+            reply_msg = REPLIES_TABADEL[idx_tabadel]; idx_tabadel = (idx_tabadel + 1) % len(REPLIES_TABADEL)
 
         if reply_msg:
             replied_users[event.sender_id] = time.time(); await reply_queue.put((event, reply_msg, 0))
 
     for client in clients: client.add_event_handler(handler, events.NewMessage())
 
-    print("✅ النظام يعمل الآن."); await asyncio.gather(control_bot.run_until_disconnected(), *(c.run_until_disconnected() for c in clients))
+    print("✅ النظام يعمل الآن. بانتظار الرسائل...")
+    await asyncio.gather(control_bot.run_until_disconnected(), *(c.run_until_disconnected() for c in clients))
 
 if __name__ == '__main__':
     asyncio.run(main())
