@@ -57,14 +57,19 @@ def load_groups():
     if os.path.exists(GROUPS_FILE):
         try:
             with open(GROUPS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict):
+                    return list(data.values())
         except: pass
-    return DEFAULT_LINKS
+    return DEFAULT_LINKS.copy()
 
 def save_groups(links):
     try:
+        to_save = list(set(links)) if isinstance(links, (list, set)) else []
         with open(GROUPS_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(set(links)), f, ensure_ascii=False, indent=4)
+            json.dump(to_save, f, ensure_ascii=False, indent=4)
     except: pass
 
 target_links = load_groups()
@@ -232,7 +237,7 @@ async def main():
             [Button.inline("📊 تقرير عن الحسابات", b"report")],
             [Button.inline("🕒 آخر الردود بأي قروب", b"last_replies"), Button.inline("💎 إحصائيات القروبات", b"group_info")],
             [Button.inline("➕ إضافة قروب", b"add_group"), Button.inline("📋 قائمة القروبات", b"list_groups")],
-            [Button.inline("⚙️ ضبط التأخير", b"delay_menu")],
+            [Button.inline("⚙️ ضبط التأخير", b"delay_menu"), Button.inline("🧹 مسح الكل", b"clear_groups")],
             [Button.inline("🛑 إيقاف قراءة الرسائل" if not is_paused else "▶️ استئناف القراءة", b"toggle")]
         ]
 
@@ -303,16 +308,28 @@ async def main():
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
+        elif event.data == b"clear_groups":
+            target_links.clear()
+            resolved_ids.clear()
+            save_groups(target_links)
+            await event.answer("✅ تم مسح جميع القروبات", alert=True)
+            status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+
         elif event.data == b"back":
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
     @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def add_group_listener(event):
-        global resolved_ids
+        global resolved_ids, target_links
         if not waiting_for_group.get(event.sender_id): return
         link = event.text.strip()
         waiting_for_group.pop(event.sender_id, None)
+
+        if not isinstance(target_links, list):
+            target_links = []
+
         found = False
         for client in clients:
             cid = await join_group(client, link)
@@ -326,11 +343,13 @@ async def main():
             await event.reply(f"✅ تم إضافة القروب وربطه بنجاح وحفظه: {link}")
         else: await event.reply(f"❌ فشل الانضمام للقروب: {link}")
 
+    print(f"🔄 جاري تحميل {len(target_links)} قروب...")
     for link in target_links:
         for client in clients:
             cid = await join_group(client, link)
             if cid:
                 resolved_ids.add(cid)
+    print(f"✅ تم تفعيل المراقبة لـ {len(resolved_ids)} معرف قروب.")
 
     for client in clients:
         client.add_event_handler(handler, events.NewMessage())
