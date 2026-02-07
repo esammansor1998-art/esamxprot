@@ -302,7 +302,12 @@ async def main():
             await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
         elif event.data == b"delay_menu":
-            buttons = [[Button.inline("15ث", b"d_15"), Button.inline("30ث", b"d_30")], [Button.inline("60ث", b"d_60"), Button.inline("120ث", b"d_120")], [Button.inline("🔙 رجوع", b"back")]]
+            buttons = [
+                [Button.inline("15ث", b"d_15"), Button.inline("30ث", b"d_30")],
+                [Button.inline("60ث", b"d_60"), Button.inline("120ث", b"d_120")],
+                [Button.inline("400ث", b"d_400")],
+                [Button.inline("🔙 رجوع", b"back")]
+            ]
             await safe_edit(event, f"⚙️ **التأخير الحالي: {reply_delay} ثانية**\nاختر مدة الاستراحة:", buttons=buttons)
 
         elif event.data.startswith(b"d_"):
