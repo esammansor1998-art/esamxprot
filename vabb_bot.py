@@ -42,12 +42,49 @@ def load_data():
 
 user_data, link_clicks = load_data()
 
-# --- واجهة الإدخال عند التشغيل ---
-print("\n" + "="*30)
-CODE_LINK = input("أدخل رابط الحصول على الكود (أو رابط خارجي): ").strip()
-SUB_CHANNEL_LINK = input("أدخل رابط قناة الاشتراك: ").strip()
-ENABLE_SUB_CHECK = input("تفعيل رسالة الاشتراك مرتين؟ (yes/no): ").strip().lower()
-print("="*30 + "\n")
+async def monitor_inactivity(app):
+    while True:
+        try:
+            now = datetime.now()
+            for user_id, data in list(user_data.items()):
+                if not data.get('activated') and not data.get('received_inactivity_msg'):
+                    join_time = datetime.fromisoformat(data['join_time'])
+                    if (now - join_time).total_seconds() > 600: # 10 دقائق
+                        if bot_config["photo2"]:
+                            try:
+                                await app.bot.send_photo(
+                                    chat_id=user_id,
+                                    photo=bot_config["photo2"],
+                                    caption=bot_config["caption2"]
+                                )
+                                user_data[user_id]['received_inactivity_msg'] = True
+                                user_data[user_id]['code_enabled'] = True
+                                save_data()
+                            except: pass
+            await asyncio.sleep(60)
+        except Exception as e:
+            logging.error(f"Error in monitor_inactivity: {e}")
+            await asyncio.sleep(60)
+
+# --- واجهة الإدخال عند التشغيل (تم الإيقاف بطلب المستخدم) ---
+CODE_LINK = "https://t.me/example"
+SUB_CHANNEL_LINK = "https://t.me/example"
+ENABLE_SUB_CHECK = "no"
+
+CONFIG_FILE = "config.json"
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except: pass
+    return {"photo1": None, "caption1": None, "photo2": None, "caption2": None}
+
+def save_config(cfg):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(cfg, f)
+
+bot_config = load_config()
 
 # --- لوحة المفاتيح الرئيسية ---
 def get_main_keyboard(is_admin=False):
@@ -87,7 +124,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'username': username,
             'start_count': 0,
             'activation_step': 0,
-            'links': []
+            'links': [],
+            'join_time': datetime.now().isoformat(),
+            'code_enabled': False,
+            'received_inactivity_msg': False
         }
 
     user_data[user_id]['username'] = username
@@ -110,6 +150,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"تأكد انك مشترك بالقناة واعد المحاوله عبر ارسال /start\n\nرابط القناة: {SUB_CHANNEL_LINK}")
 
     is_admin = (username == ADMIN_USERNAME)
+    if is_admin:
+        if not bot_config["photo1"]:
+            context.user_data['setup_step'] = 'waiting_photo1'
+            await update.message.reply_text("مرحباً أيها المدير. يرجى إرسال الصورة الأولى (التي ستظهر بعد إرسال الروابط) ⭐")
+            return
+        elif not bot_config["photo2"]:
+            context.user_data['setup_step'] = 'waiting_photo2'
+            await update.message.reply_text("يرجى إرسال الصورة الثانية (التي ستظهر بعد 10 دقائق من عدم التفاعل) 🕒")
+            return
+
     await update.message.reply_text("🔥 مرحباً بك في أضخم بوت عربي 2026 🔥", reply_markup=get_main_keyboard(is_admin))
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,26 +253,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == 'notify_admin':
         if admin_chat_id:
-            links = user_data[user_id].get('links', [])
-            links_str = "\n".join([f"{i+1}- {l}" for i, l in enumerate(links)])
-            admin_msg = (
-                f"🔔 **طلب تفعيل جديد**\n\n"
-                f"👤 المستخدم: {username} ({user_id})\n"
-                f"🔗 الروابط المرسلة:\n{links_str}"
-            )
-            kb = [
-                [InlineKeyboardButton("ارسال رد للمستخدم", callback_data=f"adm_reply:{user_id}")],
-                [InlineKeyboardButton("تفعيل البوت للمستخدم", callback_data=f"adm_activate:{user_id}")]
-            ]
             try:
-                await context.bot.send_message(chat_id=admin_chat_id, text=admin_msg, reply_markup=InlineKeyboardMarkup(kb))
-                await query.message.reply_text("تم ابلاغ الإدارة وسيتم تفعيل القروب بإقرب وقت ⭐")
-                user_data[user_id]['activation_step'] = 0 # إعادة التعيين
+                await query.message.reply_text("تم ابلاغ الإدارة وسيتم تفعيل الحساب بأقرب وقت ⭐")
+
+                # إرسال الصورة والوصف الأولى (بعد إرسال الروابط)
+                if bot_config["photo1"]:
+                    await context.bot.send_photo(
+                        chat_id=user_id,
+                        photo=bot_config["photo1"],
+                        caption=bot_config["caption1"]
+                    )
+
+                user_data[user_id]['activation_step'] = 0
+                user_data[user_id]['code_enabled'] = True # تفعيل استقبال الكود الآن
                 save_data()
-            except:
-                await query.message.reply_text("❌ حدث خطأ أثناء إعلام الإدارة. تأكد من أن المسؤول قد قام بتشغيل البوت.")
+            except Exception as e:
+                logging.error(f"Error in notify_admin callback: {e}")
+                await query.message.reply_text("❌ حدث خطأ، يرجى المحاولة لاحقاً.")
         else:
-            await query.message.reply_text("❌ لم يتم تحديد ID المسؤول بعد. يرجى انتظار دخول المسؤول.")
+            await query.message.reply_text("❌ المسؤول غير متصل حالياً لإستلام الطلب.")
         return
 
     if data.startswith('final_'):
@@ -245,12 +294,47 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip()
+    message = update.message
+    text = message.text.strip() if message.text else ""
     username = f"@{update.effective_user.username}" if update.effective_user.username else str(user_id)
 
     # التحقق من أن المستخدم مسجل في البيانات
     if user_id not in user_data:
-        user_data[user_id] = {'activated': False, 'username': username, 'start_count': 0, 'activation_step': 0, 'links': []}
+        user_data[user_id] = {
+            'activated': False,
+            'username': username,
+            'start_count': 0,
+            'activation_step': 0,
+            'links': [],
+            'join_time': datetime.now().isoformat(),
+            'code_enabled': False,
+            'received_inactivity_msg': False
+        }
+
+    # منطق الإعداد للمسؤول
+    if username == ADMIN_USERNAME:
+        setup_step = context.user_data.get('setup_step')
+        if setup_step == 'waiting_photo1':
+            if message.photo:
+                bot_config["photo1"] = message.photo[-1].file_id
+                bot_config["caption1"] = message.caption or "تم استلام الروابط بنجاح"
+                save_config(bot_config)
+                context.user_data['setup_step'] = 'waiting_photo2'
+                await message.reply_text("تم حفظ الصورة الأولى والوصف. الآن أرسل الصورة الثانية والوصف (لحالة عدم التفاعل) ⭐")
+            else:
+                await message.reply_text("يرجى إرسال صورة!")
+            return
+        elif setup_step == 'waiting_photo2':
+            if message.photo:
+                bot_config["photo2"] = message.photo[-1].file_id
+                bot_config["caption2"] = message.caption or "نحن بانتظارك لتفعيل البوت"
+                save_config(bot_config)
+                context.user_data['setup_step'] = None
+                await message.reply_text("تم اكتمال الإعداد بنجاح! 🔥")
+                await message.reply_text("🔥 مرحباً بك في أضخم بوت عربي 2026 🔥", reply_markup=get_main_keyboard(True))
+            else:
+                await message.reply_text("يرجى إرسال صورة!")
+            return
 
     if context.user_data.get('waiting_broadcast') and username == ADMIN_USERNAME:
         sent, blocked = 0, 0
@@ -309,24 +393,43 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[user_id]['activation_step'] = 4
         save_data()
         if admin_chat_id:
-            try: await context.bot.send_message(chat_id=admin_chat_id, text=f"👤 المستخدم {username} أرسل الرابط الثالث ⭐:\n{text}", reply_markup=admin_kb)
+            try:
+                await context.bot.send_message(chat_id=admin_chat_id, text=f"👤 المستخدم {username} أرسل الرابط الثالث ⭐:\n{text}", reply_markup=admin_kb)
+
+                # إرسال التقرير المجمع فوراً
+                links = user_data[user_id].get('links', [])
+                links_str = "\n".join([f"{i+1}- {l}" for i, l in enumerate(links)])
+                admin_msg = (
+                    f"🔔 **تقرير الروابط المجمع**\n\n"
+                    f"👤 المستخدم: {username} ({user_id})\n"
+                    f"🔗 الروابط المرسلة:\n{links_str}"
+                )
+                await context.bot.send_message(chat_id=admin_chat_id, text=admin_msg, reply_markup=admin_kb)
             except: pass
         kb = [[InlineKeyboardButton("اضغط هنا لإعلام الإدارة", callback_data='notify_admin')]]
-        await update.message.reply_text("تم استلام الروابط الثلاثة. اضغط على الزر أدناه لإعلام الإدارة.",
+        await update.message.reply_text("تم استلام الروابط الثلاثة بنجاح ⭐. اضغط على الزر أدناه لإعلام الإدارة وتفعيل حسابك.",
                                        reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # الكود القديم (للاحتياط أو التوافق)
+    # تفعيل البوت بالكود (متاح فقط في حالتين: بعد الروابط أو بعد 10 دقائق خمول)
     if text == CORRECT_CODE:
-        user_data[user_id]['activated'] = True
-        save_data()
-        await update.message.reply_text("✅ مبروك! تم تفعيل الحساب بنجاح. يمكنك الآن استخدام جميع الأقسام.")
+        if user_data[user_id].get('code_enabled'):
+            user_data[user_id]['activated'] = True
+            save_data()
+            await update.message.reply_text("✅ مبروك! تم تفعيل الحساب بنجاح. يمكنك الآن استخدام جميع الأقسام.")
+        else:
+            await update.message.reply_text("❌ لم يتم تفعيل خاصية إدخال الكود لك بعد. يرجى إرسال الروابط المطلوبة أولاً.")
 
 def main():
     application = Application.builder().token(TOKEN).build()
+
+    # بدء مهمة المراقبة
+    loop = asyncio.get_event_loop()
+    loop.create_task(monitor_inactivity(application))
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, text_handler))
 
     print("🚀 البوت يعمل الآن...")
     application.run_polling()
