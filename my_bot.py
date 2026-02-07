@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import asyncio, time, os, glob, random
+import asyncio, time, os, glob, random, json
 from telethon import TelegramClient, events, Button, utils
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
@@ -72,13 +72,33 @@ sessions_config = [
 
 MY_IDS = [int(s['id']) for s in sessions_config]
 
-target_links = [
+GROUPS_FILE = "groups.json"
+
+DEFAULT_LINKS = [
     'https://t.me/+z7K5sSzvWQU3NTAy',
     'https://t.me/pewndgrop',
     'https://t.me/M_R515',
     'https://t.me/+wtGW0icU0pY2YWY0',
     'https://t.me/krkokgrop'
 ]
+
+def load_groups():
+    if os.path.exists(GROUPS_FILE):
+        try:
+            with open(GROUPS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return DEFAULT_LINKS
+
+def save_groups(links):
+    try:
+        with open(GROUPS_FILE, "w") as f:
+            json.dump(list(set(links)), f)
+    except:
+        pass
+
+target_links = load_groups()
 
 replies_khas = [
     "وين رايحين، التبادلات مضيعة للوقت يخوي، عندي لك رابط بوت كله مقاطع نار نار، رابطو بوصف حسابي نار.",
@@ -204,7 +224,7 @@ async def main():
         return [
             [Button.inline("📊 تقرير عن الحسابات", b"report")],
             [Button.inline("🕒 آخر الردود بأي قروب", b"last_replies"), Button.inline("💎 إحصائيات القروبات", b"group_info")],
-            [Button.inline("➕ إضافة قروب", b"add_group")],
+            [Button.inline("➕ إضافة قروب", b"add_group"), Button.inline("📋 قائمة القروبات", b"list_groups")],
             [Button.inline("🛑 توقف مؤقت" if not is_paused else "▶️ استئناف العمل", b"toggle")]
         ]
 
@@ -258,12 +278,23 @@ async def main():
             await event.answer(f"تم تغيير الحالة إلى: {status_msg}", alert=True)
             await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة الحالية: {status_msg}", buttons=get_buttons())
 
+        elif event.data == b"list_groups":
+            text = "📋 **قائمة القروبات المراقبة:**\n\n"
+            if not target_links:
+                text += "لا توجد قروبات مضافة حالياً."
+            else:
+                for i, link in enumerate(target_links, 1):
+                    text += f"{i}. {link}\n"
+            text += f"\n🔢 عدد المعرفات النشطة: {len(resolved_ids)}"
+            await event.edit(text, buttons=[Button.inline("🔙 رجوع", b"back")])
+
         elif event.data == b"back":
             status_msg = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة الحالية: {status_msg}", buttons=get_buttons())
 
     @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def add_group_listener(event):
+        global resolved_ids
         if not waiting_for_group.get(event.sender_id):
             return
 
@@ -278,7 +309,9 @@ async def main():
                 found = True
 
         if found:
-            await event.reply(f"✅ تم إضافة القروب وربطه بنجاح: {link}")
+            target_links.append(link)
+            save_groups(target_links)
+            await event.reply(f"✅ تم إضافة القروب وربطه بنجاح وحفظه: {link}")
         else:
             await event.reply(f"❌ فشل الانضمام للقروب: {link}")
 
