@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio, time, os, glob, random
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events, Button, utils
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
 from telethon.tl.functions.channels import JoinChannelRequest
@@ -31,16 +31,16 @@ async def join_group(client, link):
             from telethon.tl.functions.messages import ImportChatInviteRequest
             await client(ImportChatInviteRequest(invite_hash))
             entity = await client.get_entity(link)
-            return entity.id
+            return utils.get_peer_id(entity)
         else:
             from telethon.tl.functions.channels import JoinChannelRequest
             entity = await client.get_entity(link)
             await client(JoinChannelRequest(entity))
-            return entity.id
+            return utils.get_peer_id(entity)
     except Exception:
         try:
             entity = await client.get_entity(link)
-            return entity.id
+            return utils.get_peer_id(entity)
         except:
             return None
 
@@ -159,7 +159,10 @@ async def worker(client, account_name):
 
 async def handler(event):
     global idx_khas, idx_tabadel, is_paused
-    if is_paused or event.sender_id in MY_IDS or event.out:
+    if is_paused:
+        return
+
+    if event.sender_id in MY_IDS or event.out:
         return
 
     if event.chat_id not in resolved_ids:
@@ -207,7 +210,8 @@ async def main():
 
     @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
     async def cmd_control(event):
-        await event.reply("🕹️ **لوحة التحكم المتقدمة:**", buttons=get_buttons())
+        status = "🔴 متوقف" if is_paused else "🟢 يعمل"
+        await event.reply(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة الحالية: {status}", buttons=get_buttons())
 
     @control_bot.on(events.CallbackQuery())
     async def catcher(event):
@@ -250,12 +254,13 @@ async def main():
 
         elif event.data == b"toggle":
             is_paused = not is_paused
-            status = "متوقف 🛑" if is_paused else "يعمل ▶️"
-            await event.answer(f"تم تغيير الحالة إلى: {status}", alert=True)
-            await event.edit("🕹️ **لوحة التحكم المتقدمة:**", buttons=get_buttons())
+            status_msg = "🔴 متوقف" if is_paused else "🟢 يعمل"
+            await event.answer(f"تم تغيير الحالة إلى: {status_msg}", alert=True)
+            await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة الحالية: {status_msg}", buttons=get_buttons())
 
         elif event.data == b"back":
-            await event.edit("🕹️ **لوحة التحكم المتقدمة:**", buttons=get_buttons())
+            status_msg = "🔴 متوقف" if is_paused else "🟢 يعمل"
+            await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة الحالية: {status_msg}", buttons=get_buttons())
 
     @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def add_group_listener(event):
