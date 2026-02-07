@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio, time, os, glob, random, json
-from telethon import TelegramClient, events, Button, utils
+from telethon import TelegramClient, events, Button, utils, types
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
 from telethon.tl.functions.channels import JoinChannelRequest
@@ -55,6 +55,7 @@ def init_log(name):
     }
 
 # --- إعدادات الحسابات ---
+MY_IDS = []
 sessions_config = [
     {
         'name': 'الجلسة الجديدة 1',
@@ -69,8 +70,6 @@ sessions_config = [
         'str': '1BJWap1sBu6F1feEVYtqx1o_ImLPmDXsjDKfL2q4nhfLm1BRYg_RpFRz-KHG9XV67qeBMmBuwusFA1YXF62GHSYDQtgx1fdy0eNy-_nQinIQHvnsMHEKdEpurPDuw9d_FmUTp2QrXj10qgWAs0XG6jRGAbqnzFNHJXnFHNgvm-tiIicwYflF_AeGiEZNc1mYZ832sQrReBdJ-g7eLYbpqSC7j3XLuylrZdxdc7eTJLURe78mHN1-y_4tPquvAULVtfl6REAaVR1zzYOfHiWojZzRPSGqAxj6dRZKGeM2lIpUL_1O6rAUUc49KJJlNgTBG5HF_xOx9qSa3DEQIhQlUiJpohQZBGuA='
     }
 ]
-
-MY_IDS = [int(s['id']) for s in sessions_config]
 
 GROUPS_FILE = "groups.json"
 
@@ -143,9 +142,13 @@ async def worker(client, account_name):
 
             try:
                 chat = await client.get_entity(event.chat_id)
-                g_title = chat.title if hasattr(chat, 'title') else "قروب"
-                msg_link = f"https://t.me/{chat.username}/{sent_msg.id}" if hasattr(chat, 'username') and chat.username else f"https://t.me/c/{str(event.chat_id).replace('-100', '')}/{sent_msg.id}"
-            except:
+                g_title = utils.get_display_name(chat)
+                if hasattr(chat, 'username') and chat.username:
+                    msg_link = f"https://t.me/{chat.username}/{sent_msg.id}"
+                else:
+                    clean_id = str(event.chat_id).replace('-100', '', 1).lstrip('-')
+                    msg_link = f"https://t.me/c/{clean_id}/{sent_msg.id}"
+            except Exception:
                 g_title = "غير معروف"
                 msg_link = "الرابط غير متاح"
 
@@ -216,6 +219,7 @@ async def main():
         client = TelegramClient(StringSession(s_info['str']), s_info['id'], s_info['hash'])
         await client.start()
         me = await client.get_me()
+        MY_IDS.append(me.id)
         init_log(me.first_name)
         clients.append(client)
         asyncio.create_task(worker(client, me.first_name))
