@@ -58,12 +58,15 @@ def load_groups():
         try:
             with open(GROUPS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                new_links = []
                 if isinstance(data, list):
-                    for l in data:
-                        if l not in links: links.append(l)
+                    new_links = data
                 elif isinstance(data, dict):
-                    for l in data.values():
-                        if l not in links: links.append(l)
+                    new_links = list(data.values())
+
+                for l in new_links:
+                    if isinstance(l, str) and l not in links:
+                        links.append(l)
         except: pass
     return links
 
@@ -77,6 +80,8 @@ def save_groups(links):
 target_links = load_groups()
 
 async def join_group(client, link):
+    if not isinstance(link, str):
+        return None
     link = link.strip()
     try:
         if 't.me/+' in link or 't.me/joinchat/' in link:
@@ -130,8 +135,9 @@ idx_tabadel = 0
 async def worker(client, account_name):
     global is_paused, last_success_list, idx_khas, idx_tabadel, group_stats, reply_delay
     while True:
+        item = await reply_queue.get()
         try:
-            event, reply_text, retry_count = await reply_queue.get()
+            event, reply_text, retry_count = item
 
             if is_paused:
                 await asyncio.sleep(1)
@@ -343,6 +349,7 @@ async def main():
 
     print(f"🔄 جاري تحميل {len(target_links)} قروب...")
     for link in target_links:
+        if not isinstance(link, str): continue
         res = False
         for client in clients:
             cid = await join_group(client, link)
