@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio, time, os, glob, random, json
+from collections import deque
 from telethon import TelegramClient, events, Button, utils, types
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
@@ -20,6 +21,7 @@ group_stats = {}
 last_success_list = []
 replied_users = {}
 reply_queue = asyncio.Queue()
+processed_msgs = deque(maxlen=1000)
 
 resolved_ids = set()
 waiting_for_group = {}
@@ -121,31 +123,35 @@ async def worker(client, account_name):
             if is_paused:
                 await asyncio.sleep(1)
                 await reply_queue.put((event, reply_text, retry_count))
-                reply_queue.task_done()
                 continue
 
             if time.time() < account_logs[account_name]['pause_until']:
                 await reply_queue.put((event, reply_text, retry_count))
                 await asyncio.sleep(2)
-                reply_queue.task_done()
                 continue
 
-            sent_msg = await client.send_message(event.chat_id, reply_text, reply_to=event.id)
+            sent_msg = await event.reply(reply_text)
 
             account_logs[account_name]['total_count'] += 1
             account_logs[account_name]['unique_ids'].add(event.sender_id)
             account_logs[account_name]['status'] = 'نشط ✅'
 
             try:
-                chat = await client.get_entity(event.chat_id)
-                g_title = utils.get_display_name(chat)
+                # محاولة الحصول على معلومات الدردشة بشكل أكثر أماناً
+                try:
+                    chat = await event.get_chat()
+                    g_title = utils.get_display_name(chat)
+                except:
+                    chat = await client.get_entity(event.chat_id)
+                    g_title = utils.get_display_name(chat)
+
                 if hasattr(chat, 'username') and chat.username:
                     msg_link = f"https://t.me/{chat.username}/{sent_msg.id}"
                 else:
                     clean_id = str(event.chat_id).replace('-100', '', 1).lstrip('-')
                     msg_link = f"https://t.me/c/{clean_id}/{sent_msg.id}"
             except Exception:
-                g_title = "غير معروف"
+                g_title = f"قروب {event.chat_id}"
                 msg_link = "الرابط غير متاح"
 
             if g_title not in group_stats:
@@ -181,6 +187,11 @@ async def handler(event):
     if is_paused: return
     if event.sender_id in MY_IDS or event.out: return
     if event.chat_id not in resolved_ids: return
+
+    msg_key = (event.chat_id, event.id)
+    if msg_key in processed_msgs:
+        return
+    processed_msgs.append(msg_key)
 
     if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 7200):
         return
@@ -228,6 +239,15 @@ async def main():
         status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
         await event.reply(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
+    async def safe_edit(event, text, buttons=None):
+        try:
+            if len(text) > 4000:
+                text = text[:3900] + "\n\n...(تم اختصار النص لتجاوز الحد المسموح به)"
+            await event.edit(text, buttons=buttons)
+        except Exception as e:
+            print(f"Error in safe_edit: {e}")
+            await event.respond(text[:4000], buttons=buttons)
+
     @control_bot.on(events.CallbackQuery())
     async def catcher(event):
         global is_paused
@@ -240,11 +260,11 @@ async def main():
             if not account_logs: text += "لا توجد بيانات متاحة."
             for name, log in account_logs.items():
                 text += f"👤 **{name}**:\n   - الحالة: {log['status']}\n   - الردود: {log['total_count']}\n   - فريد: {len(log['unique_ids'])}\n   - فشل: {log['failed_count']}\n------------------\n"
-            await event.edit(text, buttons=[Button.inline("🔙 رجوع", b"back")])
+            await safe_edit(event, text, buttons=[Button.inline("🔙 رجوع", b"back")])
 
         elif event.data == b"last_replies":
             text = "🕒 **آخر الردود الناجحة:**\n\n" + ("\n".join(last_success_list) if last_success_list else "لا توجد ردود بعد.")
-            await event.edit(text, buttons=[Button.inline("🔙 رجوع", b"back")])
+            await safe_edit(event, text, buttons=[Button.inline("🔙 رجوع", b"back")])
 
         elif event.data == b"group_info":
             text = "💎 **إحصائيات القروبات:**\n\n"
@@ -252,22 +272,22 @@ async def main():
             else:
                 for title, stats in group_stats.items():
                     text += f"📍 **{title}**:\n   - الردود: {stats['count']}\n------------------\n"
-            await event.edit(text, buttons=[Button.inline("🔙 رجوع", b"back")])
+            await safe_edit(event, text, buttons=[Button.inline("🔙 رجوع", b"back")])
 
         elif event.data == b"list_groups":
             text = "📋 **قائمة القروبات المراقبة:**\n\n" + ("\n".join([f"{i}. {l}" for i,l in enumerate(target_links, 1)]) if target_links else "لا توجد قروبات.")
             text += f"\n\n🔢 المعرفات النشطة: {len(resolved_ids)}"
-            await event.edit(text, buttons=[Button.inline("🔙 رجوع", b"back")])
+            await safe_edit(event, text, buttons=[Button.inline("🔙 رجوع", b"back")])
 
         elif event.data == b"toggle":
             is_paused = not is_paused
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await event.answer(f"تم تغيير الحالة إلى: {status_txt}", alert=True)
-            await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
         elif event.data == b"back":
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
-            await event.edit(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
     @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def add_group_listener(event):
@@ -293,7 +313,6 @@ async def main():
             cid = await join_group(client, link)
             if cid:
                 resolved_ids.add(cid)
-                break
 
     for client in clients:
         client.add_event_handler(handler, events.NewMessage())
