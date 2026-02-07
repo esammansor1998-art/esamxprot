@@ -3,6 +3,8 @@ import asyncio, time, os, glob, random, json
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
+from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
 import config
 
 # --- التخزين الدائم ---
@@ -32,7 +34,7 @@ group_stats = {}
 last_success_list = []
 replied_users = {}
 reply_queue = asyncio.Queue()
-processed_messages = set()
+processed_messages = [] # سنستخدم قائمة كـ buffer دائري
 
 def init_log(name):
     account_logs[name] = {
@@ -47,6 +49,18 @@ resolved_ids = list(set(saved_ids))
 
 idx_khas = 0
 idx_tabadel = 0
+
+async def join_group(client, link):
+    try:
+        if "/+" in link or "joinchat" in link:
+            hash_code = link.split('/')[-1].replace('+', '')
+            await client(ImportChatInviteRequest(hash_code))
+        else:
+            await client(JoinChannelRequest(link))
+        return True
+    except Exception as e:
+        print(f"⚠️ فشل الانضمام إلى {link}: {e}")
+        return False
 
 async def worker(client, account_name):
     global is_paused, last_success_list, group_stats
@@ -73,14 +87,15 @@ async def worker(client, account_name):
             group_stats[g_title]['count'] += 1
             group_stats[g_title]['links'].append(f"{account_name}: {msg_link}")
 
-            last_success_list.insert(0, f"🕒 {time.strftime('%H:%M')} | {account_name} ➜ {g_title}: {msg_link}")
+            last_success_list.insert(0, f"🕒 {time.strftime('%H:%M')} | {account_name} ➜ {g_title}")
             if len(last_success_list) > 5: last_success_list.pop()
 
             print(f"✅ [{account_name}] نجح في الرد."); await asyncio.sleep(random.uniform(15, 20))
         except FloodWaitError as e:
             account_logs[account_name]['status'] = f'مقيد ({e.seconds}ث)'; account_logs[account_name]['pause_until'] = time.time() + e.seconds
             await reply_queue.put((event, reply_text, retry_count))
-        except Exception:
+        except Exception as e:
+            print(f"❌ خطأ في إرسال الرد [{account_name}]: {e}")
             account_logs[account_name]['failed_count'] += 1
             if retry_count < 2: await reply_queue.put((event, reply_text, retry_count + 1))
         finally: reply_queue.task_done()
@@ -89,9 +104,11 @@ async def main():
     global is_paused, waiting_for_group, resolved_ids, idx_khas, idx_tabadel
     clients = []
 
+    print("🤖 جاري تشغيل بوت التحكم...")
     control_bot = TelegramClient(StringSession(), config.SESSIONS_CONFIG[0]['id'], config.SESSIONS_CONFIG[0]['hash'])
     await control_bot.start(bot_token=config.BOT_TOKEN)
 
+    print("🔑 جاري تشغيل الحسابات...")
     for s_info in config.SESSIONS_CONFIG:
         client = TelegramClient(StringSession(s_info['str']), s_info['id'], s_info['hash'])
         try:
@@ -108,13 +125,10 @@ async def main():
             data = event.data
             if data == b"report":
                 report_msg = "📝 **التقرير التفصيلي**\n━━━━━━━━━━━━━━━━━━\n"
-                all_uniques = set(); all_totals = 0
                 for name, log in account_logs.items():
-                    uniques = len(log['unique_ids']); all_uniques.update(log['unique_ids']); all_totals += log['total_count']
-                    status = log['status']
+                    uniques = len(log['unique_ids']); status = log['status']
                     if log['pause_until'] > time.time(): status = f"مقيد ({int(log['pause_until']-time.time())}ث)"
                     report_msg += f"👤 **{name}**\n  ├ {status}\n  └ فريد: {uniques} | كلي: {log['total_count']}\n"
-                report_msg += f"━━━━━━━━━━━━━━━━━━\n🏆 فريد: {len(all_uniques)} | 📈 إجمالي: {all_totals}"
                 await event.edit(report_msg, buttons=[[Button.inline("🔄 تحديث", b"report")], [Button.inline("🔙 رجوع", b"back")]])
             elif data == b"add_group":
                 waiting_for_group = True
@@ -124,7 +138,6 @@ async def main():
                 msg = "💎 **إحصائيات القروبات:**\n━━━━━━━━━━━━━━\n"
                 for g_name, data_g in group_stats.items():
                     msg += f"📍 **{g_name}**\n   └ عدد الردود: {data_g['count']}\n"
-                    for link in data_g['links'][-3:]: msg += f"   • {link}\n"
                 await event.edit(msg, buttons=[[Button.inline("🔄 تحديث", b"group_info")], [Button.inline("🔙 رجوع", b"back")]])
             elif data == b"last_replies":
                 msg = "🕒 **آخر 5 ردود:**\n━━━━━━━━━━━━━━\n" + ("\n\n".join(last_success_list) if last_success_list else "لا يوجد.")
@@ -146,7 +159,8 @@ async def main():
                     link = parts[0].strip(); gid = int(parts[1].strip())
                     if gid not in resolved_ids:
                         target_links.append(link); resolved_ids.append(gid); save_groups(target_links, resolved_ids)
-                        waiting_for_group = False; await event.reply(f"✅ تم الإضافة بنجاح: {link}")
+                        waiting_for_group = False; await event.reply(f"✅ تم الإضافة بنجاح وجاري الانضمام من جميع الحسابات...")
+                        for client in clients: asyncio.create_task(join_group(client, link))
                     else: await event.reply("⚠️ مضاف بالفعل.")
                 else: await event.reply("❌ تنسيق خاطئ: `الرابط | الايدي`")
             except Exception as e: await event.reply(f"❌ خطأ: {e}")
@@ -161,24 +175,33 @@ async def main():
         if isinstance(event, events.CallbackQuery.Event): await event.edit("🕹️ **لوحة التحكم:**", buttons=buttons)
         else: await event.reply("🕹️ **لوحة التحكم:**", buttons=buttons)
 
+    # ربط المجموعات
+    print("📡 جاري محاولة ربط المجموعات...")
     for link in target_links:
         for client in clients:
             try:
                 entity = await client.get_entity(link)
                 if entity.id not in resolved_ids: resolved_ids.append(entity.id)
                 break
-            except: continue
+            except Exception: continue
     save_groups(target_links, resolved_ids)
 
     async def handler(event):
-        global idx_khas, idx_tabadel, is_paused
+        global idx_khas, idx_tabadel, is_paused, processed_messages
         msg_uid = f"{event.chat_id}_{event.id}"
         if msg_uid in processed_messages: return
-        processed_messages.add(msg_uid)
-        if len(processed_messages) > config.MAX_PROCESSED_MESSAGES: processed_messages.clear()
-        if is_paused or event.sender_id in [int(s['id']) for s in config.SESSIONS_CONFIG] or event.out: return
+        processed_messages.append(msg_uid)
+        if len(processed_messages) > config.MAX_PROCESSED_MESSAGES: processed_messages.pop(0)
+
+        if is_paused or event.out: return
+
+        my_account_ids = [int(s['id']) for s in config.SESSIONS_CONFIG]
+        if event.sender_id in my_account_ids: return
+
+        if event.chat_id not in resolved_ids:
+            if event.chat_id not in [int("-100" + str(abs(rid))) for rid in resolved_ids]: return
+
         if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < config.REPLY_COOLDOWN): return
-        if event.chat_id not in resolved_ids: return
 
         text = (event.text or "").strip(); reply_msg = None
         if any(k in text for k in config.KEYWORDS_KHAS):
