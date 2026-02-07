@@ -4,7 +4,6 @@ from collections import deque
 from telethon import TelegramClient, events, Button, utils, types
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, MessageNotModifiedError, UserDeactivatedError
-from telethon.tl.functions.channels import JoinChannelRequest
 
 # تنظيف الجلسات السابقة عند التشغيل
 for f in glob.glob("bot_control_panel.session*"):
@@ -54,16 +53,19 @@ DEFAULT_LINKS = [
 ]
 
 def load_groups():
+    links = DEFAULT_LINKS.copy()
     if os.path.exists(GROUPS_FILE):
         try:
             with open(GROUPS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    return data
+                    for l in data:
+                        if l not in links: links.append(l)
                 elif isinstance(data, dict):
-                    return list(data.values())
+                    for l in data.values():
+                        if l not in links: links.append(l)
         except: pass
-    return DEFAULT_LINKS.copy()
+    return links
 
 def save_groups(links):
     try:
@@ -75,23 +77,28 @@ def save_groups(links):
 target_links = load_groups()
 
 async def join_group(client, link):
+    link = link.strip()
     try:
         if 't.me/+' in link or 't.me/joinchat/' in link:
             invite_hash = link.split('/')[-1].replace('+', '')
-            from telethon.tl.functions.messages import ImportChatInviteRequest
-            await client(ImportChatInviteRequest(invite_hash))
-            entity = await client.get_entity(link)
-            return utils.get_peer_id(entity)
+            from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
+            try:
+                check = await client(CheckChatInviteRequest(invite_hash))
+                if hasattr(check, 'chat'):
+                    return utils.get_peer_id(check.chat)
+                await client(ImportChatInviteRequest(invite_hash))
+            except: pass
         else:
-            from telethon.tl.functions.channels import JoinChannelRequest
-            entity = await client.get_entity(link)
-            await client(JoinChannelRequest(entity))
-            return utils.get_peer_id(entity)
-    except Exception:
-        try:
-            entity = await client.get_entity(link)
-            return utils.get_peer_id(entity)
-        except: return None
+            try:
+                from telethon.tl.functions.channels import JoinChannelRequest
+                entity = await client.get_entity(link)
+                await client(JoinChannelRequest(entity))
+                return utils.get_peer_id(entity)
+            except: pass
+
+        entity = await client.get_entity(link)
+        return utils.get_peer_id(entity)
+    except Exception: return None
 
 def init_log(name):
     account_logs[name] = {
@@ -121,7 +128,7 @@ idx_khas = 0
 idx_tabadel = 0
 
 async def worker(client, account_name):
-    global is_paused, last_success_list, idx_khas, idx_tabadel, group_stats
+    global is_paused, last_success_list, idx_khas, idx_tabadel, group_stats, reply_delay
     while True:
         try:
             event, reply_text, retry_count = await reply_queue.get()
@@ -143,7 +150,6 @@ async def worker(client, account_name):
             account_logs[account_name]['status'] = 'نشط ✅'
 
             try:
-                # محاولة الحصول على معلومات الدردشة بشكل أكثر أماناً
                 try:
                     chat = await event.get_chat()
                     g_title = utils.get_display_name(chat)
@@ -167,8 +173,7 @@ async def worker(client, account_name):
             group_stats[g_title]['links'].append(f"{account_name}: {msg_link}")
 
             last_success_list.insert(0, f"🕒 {time.strftime('%H:%M')} | {account_name} ➜ {g_title}: {msg_link}")
-            if len(last_success_list) > 5:
-                last_success_list.pop()
+            if len(last_success_list) > 10: last_success_list.pop()
 
             await asyncio.sleep(random.uniform(reply_delay, reply_delay + 5))
 
@@ -195,8 +200,7 @@ async def handler(event):
     if event.chat_id not in resolved_ids: return
 
     msg_key = (event.chat_id, event.id)
-    if msg_key in processed_msgs:
-        return
+    if msg_key in processed_msgs: return
     processed_msgs.append(msg_key)
 
     if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 7200):
@@ -217,7 +221,7 @@ async def handler(event):
         await reply_queue.put((event, reply_msg, 0))
 
 async def main():
-    global resolved_ids
+    global resolved_ids, MY_IDS, target_links
     clients = []
 
     control_bot = TelegramClient(StringSession(), sessions_config[0]['id'], sessions_config[0]['hash'])
@@ -227,44 +231,43 @@ async def main():
         client = TelegramClient(StringSession(s_info['str']), s_info['id'], s_info['hash'])
         await client.start()
         me = await client.get_me()
-        MY_IDS.append(me.id)
+        if me.id not in MY_IDS: MY_IDS.append(me.id)
         init_log(me.first_name)
         clients.append(client)
         asyncio.create_task(worker(client, me.first_name))
 
     def get_buttons():
         return [
-            [Button.inline("📊 تقرير عن الحسابات", b"report")],
-            [Button.inline("🕒 آخر الردود بأي قروب", b"last_replies"), Button.inline("💎 إحصائيات القروبات", b"group_info")],
+            [Button.inline("📊 تقرير الحسابات", b"report")],
+            [Button.inline("🕒 آخر الردود", b"last_replies"), Button.inline("💎 إحصائيات القروبات", b"group_info")],
             [Button.inline("➕ إضافة قروب", b"add_group"), Button.inline("📋 قائمة القروبات", b"list_groups")],
             [Button.inline("⚙️ ضبط التأخير", b"delay_menu"), Button.inline("🧹 مسح الكل", b"clear_groups")],
             [Button.inline("🛑 إيقاف قراءة الرسائل" if not is_paused else "▶️ استئناف القراءة", b"toggle")]
         ]
 
-    @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
-    async def cmd_control(event):
-        status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
-        await event.reply(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
-
     async def safe_edit(event, text, buttons=None):
         try:
             if len(text) > 4000:
-                text = text[:3900] + "\n\n...(تم اختصار النص لتجاوز الحد المسموح به)"
+                text = text[:3900] + "\n\n...(تم اختصار النص)"
             await event.edit(text, buttons=buttons)
-        except Exception as e:
-            print(f"Error in safe_edit: {e}")
+        except:
             await event.respond(text[:4000], buttons=buttons)
+
+    @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
+    async def cmd_control(event):
+        status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
+        await event.reply(f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
     @control_bot.on(events.CallbackQuery())
     async def catcher(event):
-        global is_paused, reply_delay
+        global is_paused, reply_delay, target_links, resolved_ids
         if event.data == b"add_group":
             waiting_for_group[event.sender_id] = True
             await event.answer("📥 أرسل رابط القروب الآن", alert=True)
 
         elif event.data == b"report":
             text = "📊 **تقرير الحسابات:**\n\n"
-            if not account_logs: text += "لا توجد بيانات متاحة."
+            if not account_logs: text += "لا توجد بيانات."
             for name, log in account_logs.items():
                 text += f"👤 **{name}**:\n   - الحالة: {log['status']}\n   - الردود: {log['total_count']}\n   - فريد: {len(log['unique_ids'])}\n   - فشل: {log['failed_count']}\n------------------\n"
             await safe_edit(event, text, buttons=[Button.inline("🔙 رجوع", b"back")])
@@ -290,35 +293,33 @@ async def main():
             is_paused = not is_paused
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await event.answer(f"تم تغيير الحالة إلى: {status_txt}", alert=True)
-            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
         elif event.data == b"delay_menu":
-            buttons = [
-                [Button.inline("15 ثانية", b"d_15"), Button.inline("30 ثانية", b"d_30")],
-                [Button.inline("60 ثانية", b"d_60"), Button.inline("120 ثانية", b"d_120")],
-                [Button.inline("🔙 رجوع", b"back")]
-            ]
-            await safe_edit(event, f"⚙️ **إعدادات التأخير الحالي: {reply_delay} ثانية**\nاختر مدة الاستراحة بين الردود:", buttons=buttons)
+            buttons = [[Button.inline("15ث", b"d_15"), Button.inline("30ث", b"d_30")], [Button.inline("60ث", b"d_60"), Button.inline("120ث", b"d_120")], [Button.inline("🔙 رجوع", b"back")]]
+            await safe_edit(event, f"⚙️ **التأخير الحالي: {reply_delay} ثانية**\nاختر مدة الاستراحة:", buttons=buttons)
 
         elif event.data.startswith(b"d_"):
-            new_delay = int(event.data.split(b"_")[1])
-            reply_delay = new_delay
-            await event.answer(f"✅ تم ضبط التأخير على {new_delay} ثانية", alert=True)
-            # العودة للقائمة الرئيسية بعد التغيير
+            reply_delay = int(event.data.split(b"_")[1])
+            await event.answer(f"✅ تم الضبط على {reply_delay}ث", alert=True)
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
-            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
         elif event.data == b"clear_groups":
-            target_links.clear()
+            target_links = DEFAULT_LINKS.copy()
             resolved_ids.clear()
             save_groups(target_links)
-            await event.answer("✅ تم مسح جميع القروبات", alert=True)
+            for link in target_links:
+                for client in clients:
+                    cid = await join_group(client, link)
+                    if cid: resolved_ids.add(cid)
+            await event.answer("🧹 تم استعادة الروابط الافتراضية", alert=True)
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
-            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
         elif event.data == b"back":
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
-            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}\nالتأخير: {reply_delay}ث", buttons=get_buttons())
 
     @control_bot.on(events.NewMessage(from_users=OWNER_ID))
     async def add_group_listener(event):
@@ -326,9 +327,6 @@ async def main():
         if not waiting_for_group.get(event.sender_id): return
         link = event.text.strip()
         waiting_for_group.pop(event.sender_id, None)
-
-        if not isinstance(target_links, list):
-            target_links = []
 
         found = False
         for client in clients:
@@ -340,16 +338,19 @@ async def main():
             if link not in target_links:
                 target_links.append(link)
                 save_groups(target_links)
-            await event.reply(f"✅ تم إضافة القروب وربطه بنجاح وحفظه: {link}")
+            await event.reply(f"✅ تم إضافة القروب وربطه وحفظه: {link}")
         else: await event.reply(f"❌ فشل الانضمام للقروب: {link}")
 
     print(f"🔄 جاري تحميل {len(target_links)} قروب...")
     for link in target_links:
+        res = False
         for client in clients:
             cid = await join_group(client, link)
             if cid:
                 resolved_ids.add(cid)
-    print(f"✅ تم تفعيل المراقبة لـ {len(resolved_ids)} معرف قروب.")
+                res = True
+        if not res: print(f"⚠️ فشل: {link}")
+    print(f"✅ المراقبة نشطة لـ {len(resolved_ids)} قروب.")
 
     for client in clients:
         client.add_event_handler(handler, events.NewMessage())
