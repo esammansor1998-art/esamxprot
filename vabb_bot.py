@@ -190,8 +190,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data in ['age_girl', 'age_boy']:
         if user_data.get(user_id, {}).get('activated'):
-            target = "فتاتك" if data == 'age_girl' else "الورع"
-            await query.message.reply_text(f"✅ تم فتح الدردشة مع {target}! جاري التحميل...")
+            await query.message.reply_text("جاري جلب معلومات القنوات من السرفر....")
         else:
             await query.edit_message_text("❌ هذا القسم يتطلب تفعيل البوت أولاً.")
             # تحفيز التفعيل
@@ -228,7 +227,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith('final_'):
         if user_data.get(user_id, {}).get('activated'):
-            await query.message.reply_text("✅ تم التحقق! جاري عرض المحتوى...")
+            await query.message.reply_text("جاري جلب معلومات القنوات من السرفر....")
         else:
             link_clicks += 1
             save_data()
@@ -279,10 +278,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # منطق تجميع الروابط
     step = user_data[user_id].get('activation_step', 0)
 
+    # أزرار المسؤول للتحكم السريع
+    admin_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("ارسال رد للمستخدم", callback_data=f"adm_reply:{user_id}")],
+        [InlineKeyboardButton("تفعيل البوت للمستخدم", callback_data=f"adm_activate:{user_id}")]
+    ])
+
     if step == 1:
         user_data[user_id]['links'].append(text)
         user_data[user_id]['activation_step'] = 2
         save_data()
+        if admin_chat_id:
+            try: await context.bot.send_message(chat_id=admin_chat_id, text=f"👤 المستخدم {username} أرسل الرابط الأول ⭐:\n{text}", reply_markup=admin_kb)
+            except: pass
         await update.message.reply_text("ممتاز، الان ارسل رابط القروب الثاني ⭐")
         return
 
@@ -290,6 +298,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[user_id]['links'].append(text)
         user_data[user_id]['activation_step'] = 3
         save_data()
+        if admin_chat_id:
+            try: await context.bot.send_message(chat_id=admin_chat_id, text=f"👤 المستخدم {username} أرسل الرابط الثاني ⭐:\n{text}", reply_markup=admin_kb)
+            except: pass
         await update.message.reply_text("جيد الان ارسل رابط القروب الثالث ليتم ارسالهم للإدارة وتفعيل البوت")
         return
 
@@ -297,6 +308,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[user_id]['links'].append(text)
         user_data[user_id]['activation_step'] = 4
         save_data()
+        if admin_chat_id:
+            try: await context.bot.send_message(chat_id=admin_chat_id, text=f"👤 المستخدم {username} أرسل الرابط الثالث ⭐:\n{text}", reply_markup=admin_kb)
+            except: pass
         kb = [[InlineKeyboardButton("اضغط هنا لإعلام الإدارة", callback_data='notify_admin')]]
         await update.message.reply_text("تم استلام الروابط الثلاثة. اضغط على الزر أدناه لإعلام الإدارة.",
                                        reply_markup=InlineKeyboardMarkup(kb))
