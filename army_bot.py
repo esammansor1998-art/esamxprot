@@ -65,6 +65,18 @@ async def join_group(client, link):
     if not isinstance(link, str): return None
     link = link.strip()
     try:
+        # دعم إضافة المعرفات الرقمية (IDs)
+        if link.lstrip('-').isdigit():
+            try:
+                entity = await client.get_entity(int(link))
+                return utils.get_peer_id(entity)
+            except:
+                if not link.startswith('-'):
+                    try:
+                        entity = await client.get_entity(int(f"-100{link}"))
+                        return utils.get_peer_id(entity)
+                    except: pass
+
         if 't.me/+' in link or 't.me/joinchat/' in link:
             invite_hash = link.split('/')[-1].replace('+', '')
             from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
