@@ -53,15 +53,15 @@ DEFAULT_LINKS = [
 def load_groups():
     if os.path.exists(GROUPS_FILE):
         try:
-            with open(GROUPS_FILE, "r") as f:
+            with open(GROUPS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except: pass
     return DEFAULT_LINKS
 
 def save_groups(links):
     try:
-        with open(GROUPS_FILE, "w") as f:
-            json.dump(list(set(links)), f)
+        with open(GROUPS_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(set(links)), f, ensure_ascii=False, indent=4)
     except: pass
 
 target_links = load_groups()
@@ -282,9 +282,10 @@ async def main():
                 resolved_ids.add(cid)
                 found = True
         if found:
-            target_links.append(link)
-            save_groups(target_links)
-            await event.reply(f"✅ تم إضافة القروب وربطه بنجاح: {link}")
+            if link not in target_links:
+                target_links.append(link)
+                save_groups(target_links)
+            await event.reply(f"✅ تم إضافة القروب وربطه بنجاح وحفظه: {link}")
         else: await event.reply(f"❌ فشل الانضمام للقروب: {link}")
 
     for link in target_links:
