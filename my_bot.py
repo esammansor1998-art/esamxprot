@@ -16,6 +16,7 @@ OWNER_ID = 6762940512
 bot_token = "8520006260:AAGWatChzdHGXhZILav0gqX3Jn91NDzj1fg"
 
 is_paused = False
+reply_delay = 20
 account_logs = {}
 group_stats = {}
 last_success_list = []
@@ -164,7 +165,7 @@ async def worker(client, account_name):
             if len(last_success_list) > 5:
                 last_success_list.pop()
 
-            await asyncio.sleep(random.uniform(15, 20))
+            await asyncio.sleep(random.uniform(reply_delay, reply_delay + 5))
 
         except FloodWaitError as e:
             account_logs[account_name]['status'] = f'مقيد ({e.seconds}ث)'
@@ -231,7 +232,8 @@ async def main():
             [Button.inline("📊 تقرير عن الحسابات", b"report")],
             [Button.inline("🕒 آخر الردود بأي قروب", b"last_replies"), Button.inline("💎 إحصائيات القروبات", b"group_info")],
             [Button.inline("➕ إضافة قروب", b"add_group"), Button.inline("📋 قائمة القروبات", b"list_groups")],
-            [Button.inline("🛑 توقف مؤقت" if not is_paused else "▶️ استئناف العمل", b"toggle")]
+            [Button.inline("⚙️ ضبط التأخير", b"delay_menu")],
+            [Button.inline("🛑 إيقاف قراءة الرسائل" if not is_paused else "▶️ استئناف القراءة", b"toggle")]
         ]
 
     @control_bot.on(events.NewMessage(pattern='تحكم', from_users=OWNER_ID))
@@ -250,7 +252,7 @@ async def main():
 
     @control_bot.on(events.CallbackQuery())
     async def catcher(event):
-        global is_paused
+        global is_paused, reply_delay
         if event.data == b"add_group":
             waiting_for_group[event.sender_id] = True
             await event.answer("📥 أرسل رابط القروب الآن", alert=True)
@@ -283,6 +285,22 @@ async def main():
             is_paused = not is_paused
             status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await event.answer(f"تم تغيير الحالة إلى: {status_txt}", alert=True)
+            await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
+
+        elif event.data == b"delay_menu":
+            buttons = [
+                [Button.inline("15 ثانية", b"d_15"), Button.inline("30 ثانية", b"d_30")],
+                [Button.inline("60 ثانية", b"d_60"), Button.inline("120 ثانية", b"d_120")],
+                [Button.inline("🔙 رجوع", b"back")]
+            ]
+            await safe_edit(event, f"⚙️ **إعدادات التأخير الحالي: {reply_delay} ثانية**\nاختر مدة الاستراحة بين الردود:", buttons=buttons)
+
+        elif event.data.startswith(b"d_"):
+            new_delay = int(event.data.split(b"_")[1])
+            reply_delay = new_delay
+            await event.answer(f"✅ تم ضبط التأخير على {new_delay} ثانية", alert=True)
+            # العودة للقائمة الرئيسية بعد التغيير
+            status_txt = "🔴 متوقف" if is_paused else "🟢 يعمل"
             await safe_edit(event, f"🕹️ **لوحة التحكم المتقدمة:**\nالحالة: {status_txt}", buttons=get_buttons())
 
         elif event.data == b"back":
