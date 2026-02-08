@@ -36,43 +36,51 @@ def load_data():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            u_data = {int(k): v for k, v in data.get('user_data', {}).items()}
+            # التأكد من صحة تحويل المفاتيح إلى int
+            u_data = {}
+            for k, v in data.get('user_data', {}).items():
+                try: u_data[int(k)] = v
+                except: pass
+
             admin_chat_id = data.get('admin_chat_id')
             bot_config = data.get('bot_config', {"photo1": None, "caption1": None, "photo2": None, "caption2": None})
             return u_data, data.get('link_clicks', 0)
-        except: pass
+        except Exception as e:
+            logging.error(f"Error loading data: {e}")
     return {}, 0
 
 user_data, link_clicks = load_data()
 
-async def monitor_inactivity(app):
-    while True:
-        try:
-            now = datetime.now()
-            for user_id, data in list(user_data.items()):
-                if not data.get('activated') and not data.get('received_inactivity_msg'):
-                    # إصلاح الخطأ لليوزرات القديمة التي لا تملك join_time
-                    if 'join_time' not in data:
-                        data['join_time'] = datetime.now().isoformat()
-                        save_data()
+async def monitor_inactivity(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now()
+    for user_id, data in list(user_data.items()):
+        # تجنب تكرار الرسالة أو إرسالها للمفعلين
+        if not data.get('activated') and not data.get('received_inactivity_msg'):
+            # تأمين وجود join_time
+            join_time_str = data.get('join_time')
+            if not join_time_str:
+                data['join_time'] = now.isoformat()
+                save_data()
+                continue
 
-                    join_time = datetime.fromisoformat(data['join_time'])
-                    if (now - join_time).total_seconds() > 600: # 10 دقائق
-                        if bot_config["photo2"]:
-                            try:
-                                await app.bot.send_photo(
-                                    chat_id=user_id,
-                                    photo=bot_config["photo2"],
-                                    caption=bot_config["caption2"]
-                                )
-                                user_data[user_id]['received_inactivity_msg'] = True
-                                user_data[user_id]['code_enabled'] = True
-                                save_data()
-                            except: pass
-            await asyncio.sleep(60)
-        except Exception as e:
-            logging.error(f"Error in monitor_inactivity: {e}")
-            await asyncio.sleep(60)
+            try:
+                join_time = datetime.fromisoformat(join_time_str)
+                if (now - join_time).total_seconds() > 600: # 10 دقائق
+                    if bot_config.get("photo2"):
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=user_id,
+                                photo=bot_config["photo2"],
+                                caption=bot_config["caption2"]
+                            )
+                            user_data[user_id]['received_inactivity_msg'] = True
+                            user_data[user_id]['code_enabled'] = True
+                            save_data()
+                            logging.info(f"Sent inactivity photo to {user_id}")
+                        except Exception as e:
+                            logging.error(f"Failed to send inactivity photo: {e}")
+            except Exception as e:
+                logging.error(f"Error parsing date for {user_id}: {e}")
 
 # --- واجهة الإدخال عند التشغيل (تم الإيقاف بطلب المستخدم) ---
 CODE_LINK = "https://t.me/example"
@@ -109,12 +117,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global admin_chat_id
     user = update.effective_user
     user_id = user.id
-    username = f"@{user.username}" if user.username else "بدون_معرف"
+    username_val = user.username if user.username else "بدون_معرف"
+    username_tagged = f"@{user.username}" if user.username else "بدون_معرف"
 
     if user_id not in user_data:
         user_data[user_id] = {
             'activated': False,
-            'username': username,
+            'username': username_tagged,
             'start_count': 0,
             'activation_step': 0,
             'links': [],
@@ -123,11 +132,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'received_inactivity_msg': False
         }
 
-    user_data[user_id]['username'] = username
+    user_data[user_id]['username'] = username_tagged
 
-    # التقاط ID المسؤول
-    if username == ADMIN_USERNAME:
+    # التقاط ID المسؤول بشكل أكثر قوة (تجاهل حالة الأحرف والعلامة @)
+    username_clean = user.username.lower() if user.username else ""
+    target_admin = ADMIN_USERNAME.lstrip('@').lower()
+
+    if username_clean == target_admin:
         admin_chat_id = user_id
+        logging.info(f"Admin identified: {user_id}")
         save_data()
 
     save_data()
@@ -143,11 +156,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_data()
             return await update.message.reply_text(f"تأكد انك مشترك بالقناة واعد المحاوله عبر ارسال /start\n\nرابط القناة: {SUB_CHANNEL_LINK}")
 
-    is_admin = (username == ADMIN_USERNAME)
+    is_admin = (user_id == admin_chat_id)
     if is_admin:
         # التأكد من تحميل البيانات في كل مرة يبدأ فيها المدير
         load_data()
-        if not bot_config["photo1"]:
+        if not bot_config.get("photo1") or update.message.text == "/setup":
             context.user_data['setup_step'] = 'waiting_photo1'
             await update.message.reply_text("مرحباً أيها المدير. يرجى إرسال الصورة الأولى (التي ستظهر بعد إرسال الروابط) ⭐")
             return
@@ -289,6 +302,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("ارسل رابط القروب الأول ⭐")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global admin_chat_id
     user_id = update.effective_user.id
     message = update.message
     text = message.text.strip() if message.text else ""
@@ -306,6 +320,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'code_enabled': False,
             'received_inactivity_msg': False
         }
+
+    # تحديث معرف المسؤول إذا لم يكن مسجلاً
+    username_clean = update.effective_user.username.lower() if update.effective_user.username else ""
+    target_admin = ADMIN_USERNAME.lstrip('@').lower()
+    if username_clean == target_admin:
+        admin_chat_id = user_id
 
     # منطق الإعداد للمسؤول
     if username == ADMIN_USERNAME:
@@ -417,13 +437,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ لم يتم تفعيل خاصية إدخال الكود لك بعد. يرجى إرسال الروابط المطلوبة أولاً.")
 
 def main():
+    # بناء التطبيق
     application = Application.builder().token(TOKEN).build()
 
-    # بدء مهمة المراقبة
-    loop = asyncio.get_event_loop()
-    loop.create_task(monitor_inactivity(application))
+    # إعداد مهمة المراقبة (كل دقيقة)
+    if application.job_queue:
+        application.job_queue.run_repeating(monitor_inactivity, interval=60, first=10)
+    else:
+        logging.warning("JobQueue not available. Inactivity monitor will not work.")
 
+    # إضافة الأوامر والمعالجات
     application.add_handler(CommandHandler("start", start))
+    # إضافة أمر الإعداد للمدير يدوياً إذا تعطل التلقائي
+    application.add_handler(CommandHandler("setup", start))
+
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, text_handler))
 
