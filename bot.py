@@ -181,36 +181,63 @@ async def run_bot():
     if clients:
         asyncio.create_task(fair_distribution_engine())
         resolved_ids = []
-        # محاولة جلب أسماء المجموعات مسبقاً
+        # محاولة جلب أسماء المجموعات مسبقاً من جميع الحسابات لضمان التغطية
         for link in target_links:
-            try:
-                ent = await clients[0].get_entity(link)
-                peer_id = utils.get_peer_id(ent)
-                if peer_id not in resolved_ids:
-                    resolved_ids.append(peer_id)
-                    group_reply_counts_global[peer_id] = 0
-                    group_names_map[peer_id] = getattr(ent, 'title', f"ID: {peer_id}").strip()
-            except: pass
-        @clients[0].on(events.NewMessage(chats=resolved_ids))
+            for cl in clients:
+                try:
+                    ent = await cl.get_entity(link)
+                    peer_id = utils.get_peer_id(ent)
+                    if peer_id not in resolved_ids:
+                        resolved_ids.append(peer_id)
+                        group_reply_counts_global[peer_id] = 0
+                        group_names_map[peer_id] = getattr(ent, 'title', f"ID: {peer_id}").strip()
+                    break # نجحنا في جلب الكيان، ننتقل للرابط التالي
+                except: continue
+
+        processed_msg_ids = set()
+
         async def handler_msg(event):
             global idx_khas, idx_tabadel, idx_saleb
+            # منع التكرار بين الحسابات
+            msg_unique_id = f"{event.chat_id}_{event.id}"
+            if msg_unique_id in processed_msg_ids: return
+            processed_msg_ids.add(msg_unique_id)
+            if len(processed_msg_ids) > 1000: processed_msg_ids.clear()
+
             if event.sender_id in MY_ACCOUNT_IDS: return
-            text = (event.text or "").strip()
-            if text in ALL_MY_REPLIES: return
-            if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 14400): return
+            text = (event.text or "").lower().strip()
+            if any(r in text for r in ALL_MY_REPLIES): return
+
+            # تحديد الكلمات المفتاحية
+            is_match = False
             msg_to_send = None
-            if "خاص" in text:
+
+            if any(w in text for w in ["خاص", "تعال خاص", "نقطة", "نقطه"]):
+                is_match = True
                 msg_to_send = replies_khas[idx_khas]; idx_khas = (idx_khas + 1) % len(replies_khas)
-            elif "سالب" in text:
+            elif any(w in text for w in ["سالب", "موجب", "ديوث", "تحرر", "نيج", "شاذ", "سوالب"]):
+                is_match = True
                 msg_to_send = replies_saleb[idx_saleb]; idx_saleb = (idx_saleb + 1) % len(replies_saleb)
-            elif any(w in text for w in ["تبادل", "ورعان", "ورع", "صغار"]):
+            elif any(w in text for w in ["تبادل", "ورعان", "ورع", "صغار", "حلوين", "ميقا", "روابط", "قاطع", "تسطير", "مقاطع"]):
+                is_match = True
                 msg_to_send = replies_tabadel[idx_tabadel]; idx_tabadel = (idx_tabadel + 1) % len(replies_tabadel)
-            if msg_to_send:
+
+            if is_match:
+                # عد الكلمة حتى لو لم يتم الرد بسبب الكولداون
                 group_keyword_counts_global[event.chat_id] = group_keyword_counts_global.get(event.chat_id, 0) + 1
-                replied_users[event.sender_id] = time.time()
-                if event.chat_id not in chat_queues:
-                    chat_queues[event.chat_id] = asyncio.Queue()
-                await chat_queues[event.chat_id].put((event, msg_to_send, 0))
+
+                # التحقق من الكولداون قبل وضع الرسالة في طابور الرد
+                if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 14400): return
+
+                if msg_to_send:
+                    replied_users[event.sender_id] = time.time()
+                    if event.chat_id not in chat_queues:
+                        chat_queues[event.chat_id] = asyncio.Queue()
+                    await chat_queues[event.chat_id].put((event, msg_to_send, 0))
+
+        # تسجيل المستمع لكل الحسابات لضمان وصول الرسائل من كل المجموعات
+        for cl in clients:
+            cl.add_event_handler(handler_msg, events.NewMessage(chats=resolved_ids))
     await asyncio.gather(control_bot.run_until_disconnected(), *(c.run_until_disconnected() for c in clients))
 if __name__ == '__main__':
     asyncio.run(run_bot())
