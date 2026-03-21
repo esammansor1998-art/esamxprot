@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio, time, os, random, sys
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events, Button, utils
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
 from datetime import datetime
@@ -131,16 +131,28 @@ async def run_bot():
             msg += f"\n🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             await event.edit(msg, buttons=[Button.inline("🔙 رجوع", b"back")])
         elif data == b"grp_stats":
-            msg = "📁 **إحصائيات إجمالي الردود:**\n\n"
-            if group_reply_counts_global:
-                # ترتيب المجموعات حسب الأكثر تفاعلاً
-                sorted_stats = sorted(group_reply_counts_global.items(), key=lambda x: x[1], reverse=True)
-                for cid, count in sorted_stats:
-                    name = group_names_map.get(cid, f"ID: {cid}")
-                    k_count = group_keyword_counts_global.get(cid, 0)
-                    msg += f"{k_count} | {count} -> {name}\n"
+            msg = "📁 **إحصائيات المجموعات:**\n\n"
+            all_cids = set(group_reply_counts_global.keys()) | set(group_keyword_counts_global.keys())
+            stats_list = []
+            total_k = 0
+            total_r = 0
+            for cid in all_cids:
+                r_count = group_reply_counts_global.get(cid, 0)
+                k_count = group_keyword_counts_global.get(cid, 0)
+                name = group_names_map.get(cid, f"ID: {cid}")
+                stats_list.append((k_count, r_count, name))
+                total_k += k_count
+                total_r += r_count
+
+            if stats_list:
+                # ترتيب حسب عدد الكلمات ثم الردود
+                stats_list.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                for k, r, name in stats_list:
+                    msg += f"💬 {k} | ✅ {r} -> {name}\n"
+                msg += f"\n📊 **الإجمالي:**\nكلمات: {total_k} | ردود: {total_r}"
             else:
-                msg += "لا توجد ردود بعد."
+                msg += "لا توجد بيانات بعد."
+
             if len(msg) > 4000: msg = msg[:3900] + "\n...(تكملة القائمة طويلة)"
             await event.edit(msg, buttons=[Button.inline("🔙 رجوع", b"back")])
         elif data == b"last_msg":
@@ -173,9 +185,11 @@ async def run_bot():
         for link in target_links:
             try:
                 ent = await clients[0].get_entity(link)
-                resolved_ids.append(ent.id)
-                group_reply_counts_global[ent.id] = 0
-                group_names_map[ent.id] = getattr(ent, 'title', f"ID: {ent.id}").strip()
+                peer_id = utils.get_peer_id(ent)
+                if peer_id not in resolved_ids:
+                    resolved_ids.append(peer_id)
+                    group_reply_counts_global[peer_id] = 0
+                    group_names_map[peer_id] = getattr(ent, 'title', f"ID: {peer_id}").strip()
             except: pass
         @clients[0].on(events.NewMessage(chats=resolved_ids))
         async def handler_msg(event):
