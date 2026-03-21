@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio, time, os, random, sys
+from collections import deque
 from telethon import TelegramClient, events, Button, utils
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
@@ -50,20 +51,26 @@ replied_users = {}
 for s in sessions:
     account_logs[s['name']] = {'total_count': 0, 'status': '⏳  متصل', 'pause_until': 0}
 async def fair_distribution_engine():
+    """محرك التوزيع العادل - يضمن الرد بالتساوي سطر بسطر بين القروبات بنظام Round-Robin"""
     try:
         while True:
             keys = list(chat_queues.keys())
             if not keys:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
                 continue
+
+            # نمر على كل القروبات بالترتيب، نأخذ رسالة واحدة من كل قروب
             for chat_id in keys:
                 q = chat_queues[chat_id]
+                # إذا كان القروب لديه رسائل ومنتظر دوره (ليس مقفلاً حالياً)
                 if not q.empty() and not chat_locks.get(chat_id, False):
                     item = await q.get()
                     await global_dispatch_queue.put(item)
-                    chat_locks[chat_id] = True
-                    await asyncio.sleep(0.3)
-            await asyncio.sleep(0.5)
+                    chat_locks[chat_id] = True # قفل القروب حتى يتم إرسال الرسالة من قبل أحد الحسابات
+                    # انتظار بسيط جداً لضمان سلاسة التوزيع
+                    await asyncio.sleep(0.1)
+
+            await asyncio.sleep(0.2)
     except asyncio.CancelledError: pass
 async def worker(client, account_name):
     global is_paused
@@ -190,7 +197,9 @@ async def run_bot():
                     if peer_id not in resolved_ids:
                         resolved_ids.append(peer_id)
                         group_reply_counts_global[peer_id] = 0
+                        group_keyword_counts_global[peer_id] = 0
                         group_names_map[peer_id] = getattr(ent, 'title', f"ID: {peer_id}").strip()
+                        chat_queues[peer_id] = asyncio.Queue()
                     break # نجحنا في جلب الكيان، ننتقل للرابط التالي
                 except: continue
 
@@ -212,13 +221,13 @@ async def run_bot():
             is_match = False
             msg_to_send = None
 
-            if any(w in text for w in ["خاص", "تعال خاص", "نقطة", "نقطه"]):
+            if any(w in text for w in ["خاص", "تعال خاص", "نقطة", "نقطه", "خااص", "خاااص"]):
                 is_match = True
                 msg_to_send = replies_khas[idx_khas]; idx_khas = (idx_khas + 1) % len(replies_khas)
-            elif any(w in text for w in ["سالب", "موجب", "ديوث", "تحرر", "نيج", "شاذ", "سوالب"]):
+            elif any(w in text for w in ["سالب", "موجب", "ديوث", "تحرر", "نيج", "شاذ", "سوالب", "سالبة", "موجبة"]):
                 is_match = True
                 msg_to_send = replies_saleb[idx_saleb]; idx_saleb = (idx_saleb + 1) % len(replies_saleb)
-            elif any(w in text for w in ["تبادل", "ورعان", "ورع", "صغار", "حلوين", "ميقا", "روابط", "قاطع", "تسطير", "مقاطع"]):
+            elif any(w in text for w in ["تبادل", "ورعان", "ورع", "صغار", "حلوين", "ميقا", "روابط", "قاطع", "تسطير", "مقاطع", "تسطيبر", "ميقاا", "رابط", "ورعن", "وروعان"]):
                 is_match = True
                 msg_to_send = replies_tabadel[idx_tabadel]; idx_tabadel = (idx_tabadel + 1) % len(replies_tabadel)
 
@@ -226,8 +235,8 @@ async def run_bot():
                 # عد الكلمة حتى لو لم يتم الرد بسبب الكولداون
                 group_keyword_counts_global[event.chat_id] = group_keyword_counts_global.get(event.chat_id, 0) + 1
 
-                # التحقق من الكولداون قبل وضع الرسالة في طابور الرد
-                if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 14400): return
+                # التحقق من الكولداون قبل وضع الرسالة في طابور الرد (7 ساعات = 25200 ثانية)
+                if event.sender_id in replied_users and (time.time() - replied_users[event.sender_id] < 25200): return
 
                 if msg_to_send:
                     replied_users[event.sender_id] = time.time()
