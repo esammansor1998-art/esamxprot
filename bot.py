@@ -21,6 +21,7 @@ chat_queues = {}
 chat_locks = {}
 global_dispatch_queue = asyncio.Queue()
 owner_reply_state = {} # للحفاظ على حالة الرد الخاص بالمالك
+user_entities_cache = {} # لتخزين بيانات المستخدمين (Entities) لتجنب خطأ الإرسال لاحقاً
 target_links = [
     'https://t.me/R_KA_N0', 'https://t.me/Nj_QU','https://t.me/krav33v','https://t.me/kakaka865gshh','https://t.me/irrrjx', 'https://t.me/L_A_m_e_s_0',
     'https://t.me/lako0019', 'https://t.me/hwlwjwo', 'https://t.me/whsuxjw', 'https://t.me/AR_HDA',
@@ -231,18 +232,20 @@ async def run_bot():
 
             if target_client:
                 try:
+                    # استخدم الـ Entity من الكاش إذا كان موجوداً، وإلا حاول باستخدام الـ ID مباشرة
+                    target_entity = user_entities_cache.get(target_id, target_id)
                     if event.media:
                         # تنزيل الميديا مؤقتاً لحل مشكلة cross-client
                         file_path = await event.client.download_media(event.media)
                         if file_path:
                             try:
-                                await target_client.send_message(target_id, event.text or "", file=file_path)
+                                await target_client.send_message(target_entity, event.text or "", file=file_path)
                             finally:
                                 os.remove(file_path)
                         else:
                             await event.reply("❌ فشل تنزيل الميديا.")
                     else:
-                        await target_client.send_message(target_id, event.text)
+                        await target_client.send_message(target_entity, event.text)
                     await event.reply("✅ تم إرسال الرد بنجاح.")
                 except Exception as e:
                     await event.reply(f"❌ فشل الإرسال: {e}")
@@ -332,55 +335,62 @@ async def run_bot():
 
         # === مراقبة الرسائل الخاصة (Private Messages) ===
         async def private_msg_handler(event):
-            # التأكد من أنها رسالة خاصة (وليست من البوت نفسه أو مجموعات)
-            if not event.is_private or event.sender_id in MY_ACCOUNT_IDS:
-                return
-
-            client = event.client
-            account_name = None
-            # تحديد الحساب الذي استقبل الرسالة
-            for s in sessions:
-                try:
-                    if s.get('_client') == client:
-                        account_name = s['name']
-                        break
-                except: pass
-
-            # محاولة بديلة لمعرفة اسم الحساب
-            if not account_name:
-                me = await client.get_me()
-                for s in sessions:
-                    if s.get('_me_id') == me.id:
-                        account_name = s['name']
-                        break
-            if not account_name:
-                account_name = "غير معروف"
-
-            sender = await event.get_sender()
-            sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', f'ID: {event.sender_id}')
-
-            # إعداد الرسالة للمالك
-            msg_header = f"📩 **رسالة خاصة جديدة**\n👤 من: [{sender_name}](tg://user?id={event.sender_id})\n🆔 ايدي: `{event.sender_id}`\n🤖 الحساب المستقبل: **{account_name}**\n\n"
-
-            # إعداد زر الرد
-            reply_button = Button.inline("✍️ رد", data=f"reply_{account_name}_{event.sender_id}")
-
             try:
-                # تحويل الرسالة للمالك
-                if event.media:
-                    # تنزيل الميديا لحل مشكلة cross-client reference
-                    file_path = await event.client.download_media(event.media)
-                    if file_path:
-                        try:
-                            await control_bot.send_message(OWNER_ID, msg_header + (event.text or ""), file=file_path, buttons=[reply_button])
-                        finally:
-                            os.remove(file_path)
+                # التأكد من أنها رسالة خاصة (وليست من البوت نفسه أو مجموعات)
+                if not event.is_private or event.sender_id in MY_ACCOUNT_IDS:
+                    return
+
+                client = event.client
+                account_name = None
+                # تحديد الحساب الذي استقبل الرسالة
+                for s in sessions:
+                    try:
+                        if s.get('_client') == client:
+                            account_name = s['name']
+                            break
+                    except: pass
+
+                # محاولة بديلة لمعرفة اسم الحساب
+                if not account_name:
+                    me = await client.get_me()
+                    for s in sessions:
+                        if s.get('_me_id') == me.id:
+                            account_name = s['name']
+                            break
+                if not account_name:
+                    account_name = "غير معروف"
+
+                sender = await event.get_sender()
+                sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', f'ID: {event.sender_id}')
+
+                # حفظ الكيان (Entity) مؤقتاً لتجنب خطأ Could not find the input entity
+                # نستخدم مفتاح مركب لتجنب تعارض access_hash بين الحسابات المختلفة
+                user_entities_cache[f"{account_name}_{event.sender_id}"] = await event.get_input_sender()
+
+                # إعداد الرسالة للمالك
+                msg_header = f"📩 **رسالة خاصة جديدة**\n👤 من: [{sender_name}](tg://user?id={event.sender_id})\n🆔 ايدي: `{event.sender_id}`\n🤖 الحساب المستقبل: **{account_name}**\n\n"
+
+                # إعداد زر الرد
+                reply_button = Button.inline("✍️ رد", data=f"reply_{account_name}_{event.sender_id}")
+
+                try:
+                    # تحويل الرسالة للمالك
+                    if event.media:
+                        # تنزيل الميديا لحل مشكلة cross-client reference
+                        file_path = await event.client.download_media(event.media)
+                        if file_path:
+                            try:
+                                await control_bot.send_message(OWNER_ID, msg_header + (event.text or ""), file=file_path, buttons=[reply_button])
+                            finally:
+                                os.remove(file_path)
+                        else:
+                            print("Error: Could not download media")
                     else:
-                        print("Error: Could not download media")
-                else:
-                    await control_bot.send_message(OWNER_ID, msg_header + (event.text or ""), buttons=[reply_button])
-            except Exception as e:
-                print(f"Error forwarding private message: {e}")
+                        await control_bot.send_message(OWNER_ID, msg_header + (event.text or ""), buttons=[reply_button])
+                except Exception as e:
+                    print(f"Error forwarding private message: {e}")
+            except Exception as outer_e:
+                print(f"General error in private_msg_handler: {outer_e}")
 
         # تسجيل مستمع الرسائل الخاصة لكل حساب
         for cl in clients:
